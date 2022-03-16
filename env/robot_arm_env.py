@@ -1,12 +1,12 @@
 import pybullet as p
 from pybullet_utils import bullet_client as bc
 import pybullet_data
-import gym, os, time
+import gym, os
 from gym import spaces
 from gym.utils import seeding
 import numpy as np
 import torch
-from utils.bullet_rotations import mat2quat, quat2mat, quat_mul
+from env.bullet_rotations import mat2quat, quat_mul
 
 
 DATAROOT = pybullet_data.getDataPath()

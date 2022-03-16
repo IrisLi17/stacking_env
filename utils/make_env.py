@@ -34,7 +34,7 @@ def make_env(env_id, rank, log_dir=None, done_when_success=False, allow_switch_g
     if 'max_episode_steps' in kwargs:
         max_episode_steps = kwargs['max_episode_steps']
         del kwargs['max_episode_steps']
-    gym.register(env_id, entry_point=PICK_ENTRY_POINT[env_id], max_episode_steps=max_episode_steps, kwargs=kwargs)
+    # gym.register(env_id, entry_point=PICK_ENTRY_POINT[env_id], max_episode_steps=max_episode_steps, kwargs=kwargs)
     env = gym.make(env_id)
     if "BulletStack" in env_id:
         from utils.wrapper import FlexibleTimeLimitWrapper

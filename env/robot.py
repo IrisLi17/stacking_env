@@ -1,8 +1,8 @@
 import pybullet as p 
 import pybullet_utils.bullet_client as bc
-from utils.bullet_rotations import quat_diff
+from env.bullet_rotations import quat_diff
 import numpy as np
-import os, time
+import os
 
 
 class XArmRobot(object):
