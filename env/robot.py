@@ -1,6 +1,6 @@
 import pybullet as p 
 import pybullet_utils.bullet_client as bc
-from env.bullet_rotations import quat_diff
+from env.bullet_rotations import quat_diff, quat_mul
 import numpy as np
 import os
 
@@ -209,6 +209,15 @@ class PandaRobot(object):
         self.eef_index = 11
         self.finger_drive_index = 9
         self.finger_range = (0, 0.04)
+        self.contact_constraint = None
+        self.gripper_status = "open"
+        self.pos_threshold = 0.005
+        self.rot_threshold = 0.1
+        self.max_delta_xyz = 0.05
+        self.max_delta_rot = 0.3
+        self.max_atomic_step = 50
+        self.graspable_objects = ()
+        self.save_video = False
         c = self.p.createConstraint(self.id,
                                     9,
                                     self.id,
@@ -239,6 +248,10 @@ class PandaRobot(object):
         if as_type == "euler":
             eef_orn = self.p.getEulerFromQuaternion(eef_orn)
         return np.array(eef_orn)
+    
+    def get_finger_width(self):
+        finger_position, *_ = self.p.getJointState(self.id, self.finger_drive_index)
+        return 2 * finger_position
 
     def control(self, eef_pos, eef_orn, finger, relative=True, teleport=False):
         # self._change_dynamics()
@@ -278,6 +291,9 @@ class PandaRobot(object):
             )
             for i in range(self.num_substeps):
                 self.p.stepSimulation()
+            if self.save_video:
+                color = self.render_fn(self.p)
+                self.video_writer.append_data(color)
             # print(self.p.getLinkState(self.id, 11)[0])
             # joint_states = self.p.getJointStates(self.id, self.motor_indices)
             # positions, *_ = zip(*joint_states)
@@ -314,6 +330,148 @@ class PandaRobot(object):
     def set_state(self, state_dict):
         for j in range(self.p.getNumJoints(self.id)):
             self.p.resetJointState(self.id, j, state_dict["qpos"][j], state_dict["qvel"][j])
+    
+    #### Primitives below #####
+    def reset_primitive(self, gripper_status: str, graspable_objects: tuple, render_fn=None):
+        self.contact_constraint = None
+        self.gripper_status = gripper_status
+        self.graspable_objects = graspable_objects
+        self.render_fn = render_fn
+    
+    def move_direct_ee_pose(self, eef_pos, eef_orn, pos_threshold=None, rot_threshold=None):
+        if pos_threshold is None:
+            pos_threshold = self.pos_threshold
+        if rot_threshold is None:
+            rot_threshold = self.rot_threshold
+        if self.gripper_status == "open":
+            desired_finger = 0.04
+        else:
+            desired_finger = self.get_finger_width() / 2 - 0.005
+        done = False
+        atomic_step = 0
+        while not done:
+            # greedily move towards the desired pose
+            cur_eef_pos = self.get_eef_position()
+            cur_eef_quat = self.get_eef_orn()
+            diff_pos = eef_pos - cur_eef_pos
+            diff_quat = quat_diff(eef_orn, cur_eef_quat)
+            if np.linalg.norm(diff_pos) < self.pos_threshold and abs(np.arccos(np.clip(diff_quat[3], -1.0, 1.0))) * 2 < self.rot_threshold:
+                done = True
+                break
+            if np.linalg.norm(diff_pos) < self.max_delta_xyz:
+                target_eef_pos = eef_pos
+            else:
+                target_eef_pos = diff_pos / np.linalg.norm(diff_pos) * self.max_delta_xyz + cur_eef_pos
+            if abs(np.arccos(np.clip(diff_quat[3], -1.0, 1.0))) * 2 < self.max_delta_rot:
+                target_eef_quat = eef_orn
+            else:
+                rot_half_angle = np.arccos(diff_quat[3])
+                rot_axis = diff_quat[:3] / np.sin(rot_half_angle)
+                # assert abs(np.linalg.norm(rot_axis) - 1) < 1e-5, (rot_axis, diff_quat)
+                try:
+                    target_eef_quat = quat_mul(
+                        np.concatenate([np.sin(self.max_delta_rot / 2) * rot_axis, [np.cos(self.max_delta_rot / 2)]]), 
+                        cur_eef_quat
+                    )
+                except:
+                    import IPython
+                    IPython.embed()
+            self.control(target_eef_pos, target_eef_quat, desired_finger, relative=False, teleport=False)
+
+            atomic_step += 1
+            if atomic_step >= self.max_atomic_step:
+                break
+        # print("atomic step", atomic_step)
+
+    def move_approach_ee_pose(self, eef_pos, eef_orn, approach_dist=0.05, pos_threshold=None, rot_threshold=None):
+        # print("desired eef pose", eef_pos, eef_orn)
+        stages = ["coarse", "fine"]
+        if pos_threshold is None:
+            pos_threshold = self.pos_threshold
+        if rot_threshold is None:
+            rot_threshold = self.rot_threshold
+        cur_eef_pos = self.get_eef_position()
+        cur_eef_orn = self.get_eef_orn()
+        # print("current eef pose", cur_eef_pos, cur_eef_orn)
+        if np.linalg.norm(cur_eef_pos - eef_pos) > pos_threshold or abs(np.arccos(quat_diff(eef_orn, cur_eef_orn)[3])) * 2 > rot_threshold:
+            approach_pos, approach_orn = self.p.multiplyTransforms(
+                eef_pos, eef_orn, np.array([0., 0., -approach_dist]), np.array([0., 0., 0., 1.])
+            )
+            # print("desired approach pose", approach_pos, approach_orn)
+            self.move_direct_ee_pose(approach_pos, approach_orn)
+            # print("after coarse stage", self.get_eef_position(), self.get_eef_orn())
+            
+            self.move_direct_ee_pose(eef_pos, eef_orn)
+            # print("after fine stage", self.get_eef_position(), self.get_eef_orn())
+
+    def gripper_move(self, target_status, teleport=False):
+        assert target_status in ["open", "close"]
+        if self.contact_constraint is not None:
+            self.p.removeConstraint(self.contact_constraint)
+            self.contact_constraint = None
+        width = 0.08 if target_status == "open" else 0.0
+        self.gripper_status = target_status
+        if teleport:
+            for j in self.motor_indices[7:]:
+                self.p.resetJointState(self.id, j, width / 2)
+        else:
+            self.p.setJointMotorControlArray(
+                self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [width / 2] * len(self.motor_indices[7:]),
+            )
+            step_count = 0
+            while True:
+                self.p.stepSimulation()
+                if self.save_video and step_count % self.num_substeps == 0:
+                    color = self.render_fn(self.p)
+                    self.video_writer.append_data(color)
+                step_count += 1
+                if abs(self.get_finger_width() - width) < 2e-3 or step_count >= self.max_atomic_step:
+                    break
+            # print("move gripper step count", step_count)
+    
+    def gripper_grasp(self):
+        if self.gripper_status == "close":
+            return
+        self.gripper_status = "close"
+        self.p.setJointMotorControlArray(
+            self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [0.0] * len(self.motor_indices[7:])
+        )
+        atomic_step = 0
+        while True:
+            self.p.stepSimulation()
+            if self.save_video and atomic_step % self.num_substeps == 0:
+                color = self.render_fn(self.p)
+                self.video_writer.append_data(color)
+            atomic_step += 1
+            contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
+            contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
+            if len(contact1) and len(contact2):
+                _, _, bodyB1, _, linkB1, *_ = zip(*contact1)
+                _, _, bodyB2, _, linkB2, *_ = zip(*contact2)
+                grasped_id = list(set.intersection(set(bodyB1), set(bodyB2)))
+                robot_pose = self.p.getLinkState(self.id, self.eef_index)
+                for obj_id in grasped_id:
+                    if obj_id in self.graspable_objects:
+                        obj_pose = self.p.getBasePositionAndOrientation(obj_id)
+                        robot_T_world = self.p.invertTransform(robot_pose[0], robot_pose[1])
+                        robot_T_obj = self.p.multiplyTransforms(robot_T_world[0], robot_T_world[1], obj_pose[0], obj_pose[1])
+                        # Add contact constraint
+                        self.contact_constraint = self.p.createConstraint(
+                            parentBodyUniqueId=self.id,
+                            parentLinkIndex=self.eef_index,
+                            childBodyUniqueId=obj_id,
+                            childLinkIndex=0,
+                            jointType=self.p.JOINT_FIXED,
+                            jointAxis=(0, 0, 0),
+                            parentFramePosition=robot_T_obj[0],
+                            parentFrameOrientation=robot_T_obj[1],
+                            childFramePosition=(0, 0, 0),
+                            childFrameOrientation=(0, 0, 0))
+                        print("grasp step count", atomic_step)
+                        return
+            if self.get_finger_width() < 2e-3 or atomic_step >= self.max_atomic_step:
+                # print("grasp step count", atomic_step)
+                return
 
 
 if __name__ == "__main__":
