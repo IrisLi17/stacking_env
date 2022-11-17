@@ -4,6 +4,7 @@ import imageio
 import pybullet as p
 import pybullet_data
 import numpy as np
+from env.bullet_rotations import quat_diff, quat_mul
 from env.robot import PandaRobot
 from gym import spaces
 from gym.utils import seeding
@@ -35,6 +36,7 @@ class BasePrimitiveEnv(gym.Env):
             save_video_path=os.path.join(os.path.dirname(__file__), "..", "tmp"),
             fps=10
         )
+        self.approach_dist = 0.05
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -65,7 +67,7 @@ class BasePrimitiveEnv(gym.Env):
         action[1:] = np.clip(action[1:], -1.0, 1.0)
         if primitive_type in [PrimitiveType.MOVE_DIRECT, PrimitiveType.MOVE_APPROACH]:
             # Add neutral value and scale
-            eef_pos = action[1:4] * np.array([0.2, 0.25, 0.15]) + np.array([0.5, 0.0, 0.15])
+            eef_pos = action[1:4] * (self.robot_eef_range[1] - self.robot_eef_range[0]) / 2 + np.mean(self.robot_eef_range, axis=0)
             eef_euler = np.array([np.pi, 0., action[4] * np.pi / 2])
             # 2pi modulo
             # if eef_euler[0] > np.pi:
@@ -74,7 +76,7 @@ class BasePrimitiveEnv(gym.Env):
         if primitive_type == PrimitiveType.MOVE_DIRECT:
             self.robot.move_direct_ee_pose(eef_pos, eef_quat)
         elif primitive_type == PrimitiveType.MOVE_APPROACH:
-            self.robot.move_approach_ee_pose(eef_pos, eef_quat)
+            self.robot.move_approach_ee_pose(eef_pos, eef_quat, approach_dist=self.approach_dist)
         elif primitive_type == PrimitiveType.GRIPPER_OPEN:
             self.robot.gripper_move("open")
         elif primitive_type == PrimitiveType.GRIPPER_GRASP:
@@ -132,8 +134,12 @@ class BasePrimitiveEnv(gym.Env):
             os.path.join(DATAROOT, "table/table.urdf"), 
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
         )
-        # TODO: lets change the end effector to link8 as on real robot?
         self.robot = PandaRobot(self.p, init_qpos, base_position)
+        robot_eef_center = np.array([0.5, 0.0, 0.15])
+        self.robot_eef_range = np.stack([
+            robot_eef_center - np.array([0.2, 0.25, 0.15]),
+            robot_eef_center + np.array([0.2, 0.25, 0.15])
+        ], axis=0)
         self._setup_callback()
     
     def _setup_callback(self):
@@ -170,14 +176,91 @@ def render(client: bc.BulletClient, width=256, height=256):
     return rgb_array
 
 
+class DrawerObjEnv(BasePrimitiveEnv):
+    def __init__(self, seed=None) -> None:
+        super().__init__(seed)
+        self.approach_dist = 0.1
+
+    def _setup_callback(self):
+        self.drawer_id = self.p.loadURDF(
+            os.path.join(os.path.dirname(__file__), "assets/drawer.urdf"), 
+            [0.40000, 0.00000, 0.1], [0.000000, 0.000000, 0.0, 1.0],
+            globalScaling=0.125
+        )
+        self.drawer_range = np.array([
+            [self.robot_eef_range[0][0] + 0.05, self.robot_eef_range[0][1] + 0.05, 0.05],
+            [self.robot_eef_range[1][0], self.robot_eef_range[1][1] - 0.05, 0.05]
+        ])
+        for j in range(self.p.getNumJoints(self.drawer_id)):
+            joint_info = self.p.getJointInfo(self.drawer_id, j)
+            if joint_info[2] != self.p.JOINT_FIXED:
+                self.drawer_joint = joint_info[0]
+                self.drawer_handle_range = (joint_info[8], joint_info[9])
+            if joint_info[12] == b'handle_r':
+                self.drawer_handle_link = joint_info[0]
+                # self.joint_damping.append(joint_info[6])
+                break
+        if not hasattr(self, "graspable_objects"):
+            self.graspable_objects = ((self.drawer_id, self.drawer_handle_link),)
+    
+    def _reset_sim(self):
+        self.robot.control(
+            np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
+            np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
+        )
+        # reset drawer
+        rand_angle = np.random.uniform(-np.pi, 0.)
+        self.p.resetBasePositionAndOrientation(
+            self.drawer_id, 
+            np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
+            (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
+        )
+        # reset drawer joint
+        self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
+        
+    def _get_graspable_objects(self):
+        return self.graspable_objects
+    
+    def oracle_agent(self):
+        handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
+        print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
+        # offset a little
+        handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
+        print("offset handle pose", handle_pose)
+        action = np.zeros(5)
+        action[0] = PrimitiveType.MOVE_APPROACH
+        eef_pos = handle_pose[0]
+        action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
+        handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
+        print("handle_euler", handle_euler)
+        action[4] = (handle_euler[2] % (np.pi)) / (np.pi / 2)
+        if action[4] > 1:
+            action[4] -= 2
+        return action
+        
+
 if __name__ == "__main__":
-    env = BasePrimitiveEnv()
+    env = DrawerObjEnv()
     env.reset()
     env.start_rec("test")
-    for i in range(10):
-        action = np.random.uniform(-1.0, 1.0, size=(5,))
-        action[0] = np.random.randint(4)
-        print("Action", action)
-        env.step(action)
+    # reach handle
+    action = np.array([PrimitiveType.MOVE_DIRECT, 0., 0., 0.2, 0.0])
+    env.step(action)
+    action = env.oracle_agent()
+    env.step(action)
+    # grasp
+    action = np.array([PrimitiveType.GRIPPER_GRASP, 0, 0, 0, 0])
+    env.step(action)
+    # pull
+    cur_eef_height = env.robot.get_eef_position()[2]
+    action = np.array([PrimitiveType.MOVE_DIRECT, 0., -1., 
+        (cur_eef_height - (env.robot_eef_range[0][2] + env.robot_eef_range[1][2]) / 2) / ((env.robot_eef_range[1][2] - env.robot_eef_range[0][2]) / 2), 0.])
+    env.step(action)
+    # for i in range(10):
+    #     action = np.random.uniform(-1.0, 1.0, size=(5,))
+    #     action[0] = np.random.randint(4)
+    #     if i == 0:
+            
+    #     print("Action", action)
+    #     env.step(action)
     env.end_rec()
-

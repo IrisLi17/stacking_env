@@ -286,7 +286,7 @@ class PandaRobot(object):
             )
             self.p.setJointMotorControlArray(
                 self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [finger] * len(self.motor_indices[7:]),
-                forces=[10] * len(self.motor_indices[7:]),
+                forces=[1000] * len(self.motor_indices[7:]),
                 # positionGains=[1] * len(self.motor_indices[7:]), velocityGains=[0.1] * len(self.motor_indices[7:])
             )
             for i in range(self.num_substeps):
@@ -446,28 +446,29 @@ class PandaRobot(object):
             contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
             contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
             if len(contact1) and len(contact2):
-                _, _, bodyB1, _, linkB1, *_ = zip(*contact1)
-                _, _, bodyB2, _, linkB2, *_ = zip(*contact2)
-                grasped_id = list(set.intersection(set(bodyB1), set(bodyB2)))
-                robot_pose = self.p.getLinkState(self.id, self.eef_index)
-                for obj_id in grasped_id:
-                    if obj_id in self.graspable_objects:
-                        obj_pose = self.p.getBasePositionAndOrientation(obj_id)
-                        robot_T_world = self.p.invertTransform(robot_pose[0], robot_pose[1])
-                        robot_T_obj = self.p.multiplyTransforms(robot_T_world[0], robot_T_world[1], obj_pose[0], obj_pose[1])
-                        # Add contact constraint
+                contact_body_and_link1 = [(item[2], item[4]) for item in contact1]
+                contact_body_and_link2 = [(item[2], item[4]) for item in contact2]
+                # robot_pose = self.p.getLinkState(self.id, self.eef_index)
+                for graspable_body_and_link in self.graspable_objects:
+                    if (graspable_body_and_link in contact_body_and_link1) and (graspable_body_and_link in contact_body_and_link2):
+                        '''
+                        # obj_id, link_id = graspable_body_and_link
+                        # obj_pose = self.p.getBasePositionAndOrientation(obj_id)
+                        # robot_T_world = self.p.invertTransform(robot_pose[0], robot_pose[1])
+                        # robot_T_obj = self.p.multiplyTransforms(robot_T_world[0], robot_T_world[1], obj_pose[0], obj_pose[1])
+                        # (The robot moves weirdly, so I removed this) Add contact constraint
                         self.contact_constraint = self.p.createConstraint(
                             parentBodyUniqueId=self.id,
                             parentLinkIndex=self.eef_index,
                             childBodyUniqueId=obj_id,
-                            childLinkIndex=0,
+                            childLinkIndex=link_id,
                             jointType=self.p.JOINT_FIXED,
                             jointAxis=(0, 0, 0),
                             parentFramePosition=robot_T_obj[0],
                             parentFrameOrientation=robot_T_obj[1],
                             childFramePosition=(0, 0, 0),
                             childFrameOrientation=(0, 0, 0))
-                        print("grasp step count", atomic_step)
+                        '''
                         return
             if self.get_finger_width() < 2e-3 or atomic_step >= self.max_atomic_step:
                 # print("grasp step count", atomic_step)
