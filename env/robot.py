@@ -281,7 +281,7 @@ class PandaRobot(object):
         else:
             self.p.setJointMotorControlArray(
                 self.id, self.motor_indices[:7], self.p.POSITION_CONTROL, joint_positions[:7],
-                forces=[1000] * 7,
+                forces=[87] * 7,
                 # positionGains=[1] * 7, velocityGains=[0.1] * 7
             )
             self.p.setJointMotorControlArray(

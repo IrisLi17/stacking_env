@@ -7,6 +7,11 @@
         <color rgba=".59 .29 0.0 1."/>
     </material>
     <link name="top">
+        <inertia>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <mass value="0.2484" />
+            <inertia ixx="0.00067275" ixy="0" ixz="0" iyy="0.0010971" iyz="0" izz="0.00176571" />
+        </inertia>
         <visual>
             <origin rpy="0 0 0" xyz="0 0 0" />
             <geometry>
@@ -14,61 +19,88 @@
             </geometry>
             <material name="mainColor" />
         </visual>
-        <visual>
-            <origin rpy="0 0 0" xyz="0.11 0 -0.01" />
-            <geometry>
-                <box size="0.01 0.18 0.03" />
-            </geometry>
-            <material name="mainColor" />
-        </visual>
-        <visual>
-            <origin rpy="0 0 0" xyz="-0.11 0 -0.01" />
-            <geometry>
-                <box size="0.01 0.18 0.03" />
-            </geometry>
-            <material name="mainColor" />
-        </visual>
-        <visual>
-            <origin rpy="0 0 0" xyz="0 0.085 -0.01" />
-            <geometry>
-                <box size="0.23 0.01 0.03" />
-            </geometry>
-            <material name="mainColor" />
-        </visual>
-        <visual>
-            <origin rpy="0 0 0" xyz="0 -0.085 -0.01" />
-            <geometry>
-                <box size="0.23 0.01 0.03" />
-            </geometry>
-            <material name="mainColor" />
-        </visual>
-
         <collision>
             <origin rpy="0 0 0" xyz="0 0 0" />
             <geometry>
                 <box size="0.23 0.18 0.01" />
             </geometry>
         </collision>
+    </link>
+    <link name="front">
+        <inertia>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <mass value="0.0324" />
+            <inertia ixx="8.991e-5" ixy="0" ixz="0" iyy="2.7e-6" iyz="0" izz="8.775e-5" />
+        </inertia>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <box size="0.01 0.18 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
         <collision>
-            <origin rpy="0 0 0" xyz="0.11 0 -0.01" />
+            <origin rpy="0 0 0" xyz="0 0 0" />
             <geometry>
                 <box size="0.01 0.18 0.03" />
             </geometry>
         </collision>
+    </link>
+    <link name="back">
+        <inertia>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <mass value="0.0324" />
+            <inertia ixx="8.991e-5" ixy="0" ixz="0" iyy="2.7e-6" iyz="0" izz="8.775e-5" />
+        </inertia>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <box size="0.01 0.18 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
         <collision>
-            <origin rpy="0 0 0" xyz="-0.11 0 -0.01" />
+            <origin rpy="0 0 0" xyz="0 0 0" />
             <geometry>
                 <box size="0.01 0.18 0.03" />
             </geometry>
         </collision>
+    </link>
+    <link name="right">
+        <inertia>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <mass value="0.0414" />
+            <inertia ixx="3.45e-6" ixy="0" ixz="0" iyy="0.00018561" iyz="0" izz="0.00018285" />
+        </inertia>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <box size="0.23 0.01 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
         <collision>
-            <origin rpy="0 0 0" xyz="0 0.085 -0.01" />
+            <origin rpy="0 0 0" xyz="0 0 0" />
             <geometry>
                 <box size="0.23 0.01 0.03" />
             </geometry>
         </collision>
+    </link>
+    <link name="left">
+        <inertia>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <mass value="0.0414" />
+            <inertia ixx="3.45e-6" ixy="0" ixz="0" iyy="0.00018561" iyz="0" izz="0.00018285" />
+        </inertia>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <box size="0.23 0.01 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
         <collision>
-            <origin rpy="0 0 0" xyz="0 -0.085 -0.01" />
+            <origin rpy="0 0 0" xyz="0 0 0" />
             <geometry>
                 <box size="0.23 0.01 0.03" />
             </geometry>
@@ -77,8 +109,10 @@
     <link name="lid">
         <inertial>
             <origin rpy="0 0 0" xyz="0 0 0"/>
-            <mass value=".1"/>
-            <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+            <!-- assume density is 600kg/m^3 -->
+            <mass value=".0212"/>
+            <!-- ixx = iyy = 1/12 * m * (3 * r^2 + h^2), izz= 1/2 * m * r^2 -->
+            <inertia ixx="5.610688e-6" ixy="0" ixz="0" iyy="5.610688e-6" iyz="0" izz="2.385647e-6"/>
         </inertial>
         <visual>
             <origin rpy="0 0 0" xyz="0 0 0" />
@@ -94,9 +128,28 @@
             </geometry>
         </collision>
     </link>
-
+    <joint name="front_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="0.11 0 -0.01" />
+        <parent link="top" />
+        <child link="front" />
+    </joint>
+    <joint name="back_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="-0.11 0 -0.01" />
+        <parent link="top" />
+        <child link="back" />
+    </joint>
+    <joint name="right_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="0 0.085 -0.01" />
+        <parent link="top" />
+        <child link="right" />
+    </joint>
+    <joint name="left_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="0 -0.085 -0.01" />
+        <parent link="top" />
+        <child link="left" />
+    </joint>
     <joint name="lid_joint" type="fixed">
-        <origin rpy="0 0 0" xyz="0 0 0.025"/>
+        <origin rpy="0 0 0" xyz="0 0 0.03"/>
         <parent link="top" />
         <child link="lid" />
     </joint>
