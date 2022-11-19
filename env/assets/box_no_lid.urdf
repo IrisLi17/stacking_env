@@ -1,0 +1,80 @@
+<?xml version="0.0" ?>
+<robot name="box_no_lid">
+    <material name="grey">
+        <color rgba=".5 .5 .5 1."/>
+    </material>
+    <material name="baseColor">
+        <color rgba=".68 .85 .90 1."/>
+    </material>
+    <link name="base">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 -0.025"/>
+            <geometry>
+                <box size="0.2 0.15 0.01"/>
+            </geometry>
+            <material name="baseColor" />
+        </visual>
+        <visual>
+        <!-- right -->
+            <origin rpy="0 0 0" xyz="0 -0.07 0"/>
+            <geometry>
+                <box size="0.2 0.01 0.06"/>
+            </geometry>
+            <material name="baseColor"/>
+        </visual>
+        <visual>
+            <!-- left -->
+            <origin rpy="0 0 0" xyz="0 0.07 0"/>
+            <geometry>
+                <box size="0.2 0.01 0.06"/>
+            </geometry>
+            <material name="baseColor"/>
+        </visual>
+        <visual>
+            <!-- front -->
+            <origin rpy="0 0 0" xyz="0.095 0 0"/>
+            <geometry>
+                <box size=".01 0.15 0.06"/>
+            </geometry>
+            <material name="baseColor"/>
+        </visual>
+        <visual>
+            <!-- back -->
+            <origin rpy="0 0 0" xyz="-.095 0 0"/>
+            <geometry>
+                <box size="0.01 0.15 0.06" />
+            </geometry>
+            <material name="baseColor" />
+        </visual>
+        <collision>
+            <origin rpy="0 0 0" xyz="0 0 -0.025"/>
+            <geometry>
+                <box size="0.2 0.15 0.01"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="0 -.07 0"/>
+            <geometry>
+                <box size="0.2 .01 0.06"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="0 .07 0"/>
+            <geometry>
+                <box size="0.2 .01 0.06"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz=".095 0 0"/>
+            <geometry>
+                <box size=".01 0.15 0.06"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="-.095 0 0"/>
+            <geometry>
+                <box size="0.01 0.15 0.06" />
+            </geometry>
+        </collision>
+    </link>
+</robot>

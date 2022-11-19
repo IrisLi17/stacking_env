@@ -1,0 +1,103 @@
+<?xml version="0.0" ?>
+<robot name="box_lid.urdf">
+    <material name="mainColor">
+        <color rgba=".1 .25 .6 1."/>
+    </material>
+    <material name="brown">
+        <color rgba=".59 .29 0.0 1."/>
+    </material>
+    <link name="top">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <box size="0.23 0.18 0.01" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
+        <visual>
+            <origin rpy="0 0 0" xyz="0.11 0 -0.01" />
+            <geometry>
+                <box size="0.01 0.18 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
+        <visual>
+            <origin rpy="0 0 0" xyz="-0.11 0 -0.01" />
+            <geometry>
+                <box size="0.01 0.18 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0.085 -0.01" />
+            <geometry>
+                <box size="0.23 0.01 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 -0.085 -0.01" />
+            <geometry>
+                <box size="0.23 0.01 0.03" />
+            </geometry>
+            <material name="mainColor" />
+        </visual>
+
+        <collision>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <box size="0.23 0.18 0.01" />
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="0.11 0 -0.01" />
+            <geometry>
+                <box size="0.01 0.18 0.03" />
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="-0.11 0 -0.01" />
+            <geometry>
+                <box size="0.01 0.18 0.03" />
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="0 0.085 -0.01" />
+            <geometry>
+                <box size="0.23 0.01 0.03" />
+            </geometry>
+        </collision>
+        <collision>
+            <origin rpy="0 0 0" xyz="0 -0.085 -0.01" />
+            <geometry>
+                <box size="0.23 0.01 0.03" />
+            </geometry>
+        </collision>
+    </link>
+    <link name="lid">
+        <inertial>
+            <origin rpy="0 0 0" xyz="0 0 0"/>
+            <mass value=".1"/>
+            <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+        </inertial>
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <cylinder radius="0.015" length="0.05"/>
+            </geometry>
+            <material name="brown" />
+        </visual>
+        <collision>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <cylinder radius="0.015" length="0.05" />
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="lid_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="0 0 0.025"/>
+        <parent link="top" />
+        <child link="lid" />
+    </joint>
+</robot>

@@ -89,7 +89,7 @@ class BasePrimitiveEnv(gym.Env):
         return new_obs, reward, done, info
     
     def sample_goal(self):
-        pass
+        return {"state": None, "img": None}
 
     def compute_reward_and_info(self):
         reward = 0
@@ -149,7 +149,12 @@ class BasePrimitiveEnv(gym.Env):
         pass
 
     def _get_obs(self):
-        return {}
+        robot_state = self.robot.get_state()
+        joint_pos = robot_state["qpos"]
+        eef_pos = self.robot.get_eef_position()
+        eef_euler = self.robot.get_eef_orn(as_type="euler")
+        scene = render(self.p, width=224, height=224)
+        return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
     
     def _get_graspable_objects(self):
         return ()
@@ -176,11 +181,198 @@ def render(client: bc.BulletClient, width=256, height=256):
     return rgb_array
 
 
-class DrawerObjEnv(BasePrimitiveEnv):
+class BoxLidEnv(BasePrimitiveEnv):
     def __init__(self, seed=None) -> None:
         super().__init__(seed)
         self.approach_dist = 0.1
 
+    def _setup_callback(self):
+        # self.drawer_id = self.p.loadURDF(
+        #     os.path.join(os.path.dirname(__file__), "assets/drawer.urdf"), 
+        #     [0.40000, 0.00000, 0.1], [0.000000, 0.000000, 0.0, 1.0],
+        #     globalScaling=0.125
+        # )
+        # self.drawer_range = np.array([
+        #     [self.robot_eef_range[0][0] + 0.05, self.robot_eef_range[0][1] + 0.05, 0.05],
+        #     [self.robot_eef_range[1][0], self.robot_eef_range[1][1] - 0.05, 0.05]
+        # ])
+        # for j in range(self.p.getNumJoints(self.drawer_id)):
+        #     joint_info = self.p.getJointInfo(self.drawer_id, j)
+        #     if joint_info[2] != self.p.JOINT_FIXED:
+        #         self.drawer_joint = joint_info[0]
+        #         self.drawer_handle_range = (joint_info[8], joint_info[9])
+        #     if joint_info[12] == b'handle_r':
+        #         self.drawer_handle_link = joint_info[0]
+        #         # self.joint_damping.append(joint_info[6])
+        #         break
+        self.box_base_id = self.p.loadURDF(
+            os.path.join(os.path.dirname(__file__), "assets/box_no_lid.urdf"),
+            [0.5, -0.3, 0.08], [0., 0., 0., 1.], useFixedBase=True,
+        )
+        self.box_lid_id = self.p.loadURDF(
+            os.path.join(os.path.dirname(__file__), "assets/box_lid.urdf"),
+            [0.5, -0.3, 0.13], [0., 0., 0., 1.]
+        )
+        self.box_range = np.array([
+            [self.robot_eef_range[0][0] + 0.08, self.robot_eef_range[0][1] + 0.08],
+            [self.robot_eef_range[1][0] - 0.08, self.robot_eef_range[1][1] - 0.08],
+        ])
+        for j in range(self.p.getNumJoints(self.box_lid_id)):
+            joint_info = self.p.getJointInfo(self.box_lid_id, j)
+            if joint_info[12] == b'lid':
+                self.box_lid_link = joint_info[0]
+                break
+        if not hasattr(self, "graspable_objects"):
+            self.graspable_objects = ((self.box_lid_id, self.box_lid_link),)
+    
+    def _reset_sim(self):
+        # reset drawer
+        # rand_angle = np.random.uniform(-np.pi, 0.)
+        # self.p.resetBasePositionAndOrientation(
+        #     self.drawer_id, 
+        #     np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
+        #     # ((self.drawer_range[0][0] + self.drawer_range[1][0]) / 2, 0.1, self.drawer_range[0][2]),
+        #     (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
+        # )
+        # # reset drawer joint
+        # self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
+        
+        # reset box
+        box_xy = np.random.uniform(
+            low=self.box_range[0], high=self.box_range[1],
+        )
+        self.p.resetBasePositionAndOrientation(
+            self.box_base_id, np.concatenate([box_xy, [0.03]]), [0., 0., 0., 1.]
+        )
+        self.p.resetBasePositionAndOrientation(
+            self.box_lid_id, np.concatenate([box_xy , [0.095]]), [0., 0., 0., 1.]
+        )
+        self.robot.control(
+            np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
+            np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
+        )
+        while True:
+            self.p.performCollisionDetection()
+            is_in_contact = False
+            is_in_contact = is_in_contact or (len(self.p.getContactPoints(bodyA=self.robot.id, bodyB=self.box_base_id)) > 0)
+            is_in_contact = is_in_contact or (len(self.p.getContactPoints(bodyA=self.robot.id, bodyB=self.box_lid_id)) > 0)
+            if not is_in_contact:
+                break
+            self.robot.control(
+                np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
+                np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
+            )
+        
+    def _get_graspable_objects(self):
+        return self.graspable_objects
+    
+    def sample_goal(self):
+        # store current state for recovery
+        robot_state = self.robot.get_state()
+        box_lid_pose = self.p.getBasePositionAndOrientation(self.box_lid_id)        
+        
+        # pair of underlying state and goal image
+        box_base_pose = self.p.getBasePositionAndOrientation(self.box_base_id)
+        goal_lid_pos = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.025]])
+        while abs(goal_lid_pos[0] - box_base_pose[0][0]) < 0.21 and abs(goal_lid_pos[1] - box_base_pose[0][1]) < 0.16:
+            goal_lid_pos = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.025]])
+        goal_lid_quat = box_lid_pose[1]
+
+        # set into the environment to get image
+        self.p.resetBasePositionAndOrientation(self.box_lid_id, goal_lid_pos, goal_lid_quat)
+        # Need to simulate until valid, or make sure the sampled goal is stable
+        self.p.stepSimulation()
+        goal_img = render(self.p, width=224, height=224)
+        goal_dict = {'state': (goal_lid_pos, goal_lid_quat), 'img': goal_img}
+
+        # recover state
+        self.p.resetBasePositionAndOrientation(self.box_lid_id, box_lid_pose[0], box_lid_pose[1])
+        self.robot.set_state(robot_state)
+        return goal_dict
+
+    # def oracle_agent(self):
+    #     handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
+    #     print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
+    #     # offset a little
+    #     handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
+    #     print("offset handle pose", handle_pose)
+    #     action = np.zeros(5)
+    #     action[0] = PrimitiveType.MOVE_APPROACH
+    #     eef_pos = handle_pose[0] + np.array([0.0, 0.0, 0.005])
+    #     action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
+    #     handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
+    #     print("handle_euler", handle_euler)
+    #     action[4] = (handle_euler[2] % (np.pi)) / (np.pi / 2)
+    #     if action[4] > 1:
+    #         action[4] -= 2
+    #     return action
+    def _eef_pos_to_action(self, eef_pos):
+        return (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
+
+    def oracle_agent(self, task="open_box"):
+        if task == "open_box":
+            # move up
+            action = np.concatenate([
+                [PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(
+                    self.robot.get_eef_position() + np.array([0., 0., 0.2])
+                ), [0.]])
+            self.step(action)
+            # move to lid
+            lid_pose = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
+            action = np.zeros(5)
+            action[0] = PrimitiveType.MOVE_APPROACH
+            eef_pos = lid_pose[0]
+            action[1:4] = self._eef_pos_to_action(eef_pos)
+            self.step(action)
+            # grasp
+            action = np.concatenate([[PrimitiveType.GRIPPER_GRASP], [0., 0., 0., 0.]])
+            self.step(action)
+            # lift up
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.1])), [0.]])
+            self.step(action)
+            # put down
+            base_pos = self.p.getBasePositionAndOrientation(self.box_base_id)[0]
+            if base_pos[1] > 0:
+                new_pos = base_pos + np.array([0., -0.25, 0.02])
+            else:
+                new_pos = base_pos + np.array([0., 0.25, 0.02])
+            action = np.concatenate([[PrimitiveType.MOVE_APPROACH], self._eef_pos_to_action(new_pos), [0.]])
+            self.step(action)
+            # release
+            action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], [0., 0., 0., 0.]])
+            self.step(action)
+            # go up
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([-0.1, -0.2, 0.2])), [0.]])
+            self.step(action)
+        elif task == "close_box":
+            lid_pose = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
+            lid_yaw = self.p.getEulerFromQuaternion(lid_pose[1])[2]
+            action = np.concatenate([[PrimitiveType.MOVE_APPROACH], self._eef_pos_to_action(lid_pose[0]), [lid_yaw / (np.pi / 2)]])
+            self.step(action)
+            # grasp
+            action = np.array([PrimitiveType.GRIPPER_GRASP, 0., 0., 0., 0.])
+            self.step(action)
+            # lift up
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.2])), [0.]])
+            self.step(action)
+            # move to box
+            box_pos = self.p.getBasePositionAndOrientation(self.box_base_id)[0]
+            action = np.concatenate([[PrimitiveType.MOVE_APPROACH], self._eef_pos_to_action(box_pos + np.array([0., 0., 0.1])), [0.]])
+            self.step(action)
+            # release
+            action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], [0., 0., 0., 0.]])
+            self.step(action)
+            # move away
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.1])), [0.]])
+            self.step(action)
+        return 
+
+
+class DrawerObjEnv(BasePrimitiveEnv):
+    def __init__(self, seed=None) -> None:
+        super().__init__(seed)
+        self.approach_dist = 0.1
+    
     def _setup_callback(self):
         self.drawer_id = self.p.loadURDF(
             os.path.join(os.path.dirname(__file__), "assets/drawer.urdf"), 
@@ -202,65 +394,73 @@ class DrawerObjEnv(BasePrimitiveEnv):
                 break
         if not hasattr(self, "graspable_objects"):
             self.graspable_objects = ((self.drawer_id, self.drawer_handle_link),)
-    
+
     def _reset_sim(self):
-        self.robot.control(
-            np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
-            np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
-        )
-        # reset drawer
         rand_angle = np.random.uniform(-np.pi, 0.)
         self.p.resetBasePositionAndOrientation(
             self.drawer_id, 
             np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
+            # ((self.drawer_range[0][0] + self.drawer_range[1][0]) / 2, 0.1, self.drawer_range[0][2]),
             (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
         )
         # reset drawer joint
         self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
-        
+        # reset robot
+        self.robot.control(
+            np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
+            np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
+        )
+        while True:
+            self.p.performCollisionDetection()
+            is_in_contact = False
+            is_in_contact = is_in_contact or (len(self.p.getContactPoints(bodyA=self.robot.id, bodyB=self.drawer_id)) > 0)
+            if not is_in_contact:
+                break
+            self.robot.control(
+                np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
+                np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
+            )
+    
     def _get_graspable_objects(self):
         return self.graspable_objects
     
-    def oracle_agent(self):
-        handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
-        print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
-        # offset a little
-        handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
-        print("offset handle pose", handle_pose)
-        action = np.zeros(5)
-        action[0] = PrimitiveType.MOVE_APPROACH
-        eef_pos = handle_pose[0]
-        action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
-        handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
-        print("handle_euler", handle_euler)
-        action[4] = (handle_euler[2] % (np.pi)) / (np.pi / 2)
-        if action[4] > 1:
-            action[4] -= 2
-        return action
+    def sample_goal(self):
+        # store current state for recovery
+        robot_state = self.robot.get_state()
+        drawer_joint_state = self.p.getJointState(self.drawer_id, self.drawer_joint)        
         
+        # pair of underlying state and goal image
+        goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
+
+        # set into the environment to get image
+        self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
+        # Need to simulate until valid, or make sure the sampled goal is stable
+        self.p.stepSimulation()
+        goal_img = render(self.p, width=224, height=224)
+        goal_dict = {'state': (goal_drawer_joint,), 'img': goal_img}
+
+        # recover state
+        self.p.resetJointState(self.drawer_id, self.drawer_joint, drawer_joint_state[0], drawer_joint_state[1])
+        self.robot.set_state(robot_state)
+        return goal_dict
 
 if __name__ == "__main__":
-    env = DrawerObjEnv()
-    env.reset()
+    env = BoxLidEnv()
+    obs = env.reset()
+    cur_img = obs["img"]
+    goal_img = obs["goal"]
+    goal_state = env.goal["state"]
+    import matplotlib.pyplot as plt
+    plt.imsave("cur_img.png", cur_img)
+    plt.imsave("goal_img.png", goal_img)
+    print("goal state", goal_state, "robot_state", obs["robot_state"])
     env.start_rec("test")
-    # reach handle
-    action = np.array([PrimitiveType.MOVE_DIRECT, 0., 0., 0.2, 0.0])
-    env.step(action)
-    action = env.oracle_agent()
-    env.step(action)
-    # grasp
-    action = np.array([PrimitiveType.GRIPPER_GRASP, 0, 0, 0, 0])
-    env.step(action)
-    # pull
-    cur_eef_height = env.robot.get_eef_position()[2]
-    action = np.array([PrimitiveType.MOVE_DIRECT, 0., -1., 
-        (cur_eef_height - (env.robot_eef_range[0][2] + env.robot_eef_range[1][2]) / 2) / ((env.robot_eef_range[1][2] - env.robot_eef_range[0][2]) / 2), 0.])
-    env.step(action)
-    # for i in range(10):
-    #     action = np.random.uniform(-1.0, 1.0, size=(5,))
-    #     action[0] = np.random.randint(4)
+    # env.oracle_agent("open_box")
+    # env.oracle_agent("close_box")
+    for i in range(50):
+        action = np.random.uniform(-1.0, 1.0, size=(5,))
+        action[0] = np.random.randint(4)
     #     if i == 0:
-            
     #     print("Action", action)
-    #     env.step(action)
+        env.step(action)
     env.end_rec()

@@ -289,8 +289,39 @@ class PandaRobot(object):
                 forces=[1000] * len(self.motor_indices[7:]),
                 # positionGains=[1] * len(self.motor_indices[7:]), velocityGains=[0.1] * len(self.motor_indices[7:])
             )
+            def contact_points_info(res):
+                return {
+                    'bodyUniqueIdA': res[1],
+                    'bodyUniqueIdB': res[2],
+                    'linkIndexA': res[3],
+                    'linkIndexB': res[4],
+                    'positionOnA': res[5],
+                    'positionOnB': res[6],
+                    'contactNormalOnB': res[7],
+                    'contactDistance': res[8],
+                    'normalForce': res[9],
+                    'lateralFriction1': res[10],
+                    'lateralFrictionDir1': res[11],
+                    'lateralFriction2': res[12],
+                    'lateralFrictionDir2': res[13],
+                }
+                
             for i in range(self.num_substeps):
                 self.p.stepSimulation()
+                if len(self.graspable_objects) and i % 2 == 0:
+                    contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
+                    contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
+                    contact_body_and_link1 = [(item[2], item[4]) for item in contact1]
+                    contact_body_and_link2 = [(item[2], item[4]) for item in contact2]
+                    # for g in self.graspable_objects:
+                    #     if g in contact_body_and_link1 or g in contact_body_and_link2:
+                    #         # debug
+                    #         for idx in range(len(contact_body_and_link1)):
+                    #             if contact_body_and_link1[idx] == g:
+                    #                 print(i, "contact1", contact_points_info(contact1[idx]))
+                    #         for idx in range(len(contact_body_and_link2)):
+                    #             if contact_body_and_link2[idx] == g:
+                    #                 print(i, "contact2", contact_points_info(contact2[idx]))
             if self.save_video:
                 color = self.render_fn(self.p)
                 self.video_writer.append_data(color)

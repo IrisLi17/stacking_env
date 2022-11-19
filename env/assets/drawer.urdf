@@ -106,10 +106,10 @@
 
   <link name="handle_r">
     <contact>
-      <rolling_friction value="1000.0"/>
-      <lateral_friction value="1000.0"/>
+      <rolling_friction value="10.0"/>
+      <lateral_friction value="10.0"/>
       <!-- lateral_friction was key to not making the gripper slide on the handle--> 
-      <spinning_friction value="1000.0"/>
+      <spinning_friction value="10.0"/>
       <contact_cfm value="0.0"/>
       <contact_erp value="1.0"/>
     </contact>
@@ -135,9 +135,9 @@
 
   <link name="handle_plate_far">
     <contact>
-      <rolling_friction value="1000.0"/>
-      <lateral_friction value="1000.0"/>
-      <spinning_friction value="1000.0"/>
+      <rolling_friction value="10.0"/>
+      <lateral_friction value="10.0"/>
+      <spinning_friction value="10.0"/>
       <contact_cfm value="0.0"/>
       <contact_erp value="1.0"/>
     </contact>
@@ -163,9 +163,9 @@
 
   <link name="handle_plate_near">
     <contact>
-      <rolling_friction value="1000.0"/>
-      <lateral_friction value="1000.0"/>
-      <spinning_friction value="1000.0"/>
+      <rolling_friction value="10.0"/>
+      <lateral_friction value="10.0"/>
+      <spinning_friction value="10.0"/>
       <contact_cfm value="0.0"/>
       <contact_erp value="1.0"/>
     </contact>
