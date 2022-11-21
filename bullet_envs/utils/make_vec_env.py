@@ -6,8 +6,8 @@ import gym
 import os
 
 
-def make_env(env_id, rank, log_dir=None, info_keywords=("is_success",)):
-    env = gym.make(env_id)
+def make_env(env_id, rank, log_dir=None, info_keywords=("is_success",), kwargs={}):
+    env = gym.make(env_id, **kwargs)
     env = DoneOnSuccessWrapper(env)
     if log_dir is not None:
         env = Monitor(env, os.path.join(log_dir, "%d.monitor.csv" % rank), info_keywords=info_keywords)

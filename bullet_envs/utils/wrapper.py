@@ -135,14 +135,22 @@ class MVPVecPyTorch(VecEnvWrapper):
         self.mvp_model = mvp.load("vitb-mae-egosoup")
         self.mvp_model.to(self.device)
         self.mvp_model.freeze()
+        self.im_mean = np.array([0.485, 0.456, 0.406]).reshape((3, 1, 1))
+        self.im_std = np.array([0.229, 0.224, 0.225]).reshape((3, 1, 1))
         self.reset()
     
+    def _normalize_obs(self, obs):
+        normed_img = (obs["img"] / 255.0 - np.expand_dims(self.im_mean, axis=0)) / np.expand_dims(self.im_std, axis=0)
+        normed_goal = (obs["goal"] / 255.0 - np.expand_dims(self.im_mean, axis=0)) / np.expand_dims(self.im_std, axis=0)
+        return normed_img, normed_goal
+
     def reset(self):
         obs = self.venv.reset()
         assert "img" in obs.keys() and "goal" in obs.keys()
-        scene_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["img"]).float().to(self.device))
+        normed_img, normed_goal = self._normalize_obs(obs)
+        scene_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_img).float().to(self.device))
         scene_feat = self.mvp_model.forward_norm(scene_feat)
-        goal_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["goal"]).float().to(self.device))
+        goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
         goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
         obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
@@ -157,10 +165,11 @@ class MVPVecPyTorch(VecEnvWrapper):
     def step_wait(self):
         obs, reward, done, info = self.venv.step_wait()
         assert "img" in obs.keys() and "goal" in obs.keys()
+        normed_img, normed_goal = self._normalize_obs(obs)
         with torch.no_grad():
-            scene_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["img"]).float().to(self.device))
+            scene_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_img).float().to(self.device))
             scene_feat = self.mvp_model.forward_norm(scene_feat)
-            goal_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["goal"]).float().to(self.device))
+            goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
             goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
         obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
