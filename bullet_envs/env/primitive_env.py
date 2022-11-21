@@ -4,6 +4,7 @@ import imageio
 import pybullet as p
 import pybullet_data
 import numpy as np
+import time
 from bullet_envs.env.bullet_rotations import quat_diff, quat_mul
 from bullet_envs.env.robot import PandaRobot
 from gym import spaces
@@ -68,6 +69,7 @@ class BasePrimitiveEnv(gym.Env):
         assert action.shape[0] == 1 + 4
         primitive_type = int(np.round(action[0]))
         action[1:] = np.clip(action[1:], -1.0, 1.0)
+        # t0 = time.time()
         if primitive_type in [PrimitiveType.MOVE_DIRECT, PrimitiveType.MOVE_APPROACH]:
             # Add neutral value and scale
             eef_pos = action[1:4] * (self.robot_eef_range[1] - self.robot_eef_range[0]) / 2 + np.mean(self.robot_eef_range, axis=0)
@@ -86,6 +88,7 @@ class BasePrimitiveEnv(gym.Env):
             self.robot.gripper_grasp()
         else:
             raise NotImplementedError
+        # print("step primitive", time.time() - t0)
         new_obs = self._get_obs()
         reward, info = self.compute_reward_and_info()
         done = False
@@ -171,10 +174,10 @@ class BasePrimitiveEnv(gym.Env):
 
 def render(client: bc.BulletClient, width=256, height=256) -> np.ndarray:
     view_matrix = client.computeViewMatrixFromYawPitchRoll(
-        cameraTargetPosition=(0.3, 0, 0.2),
+        cameraTargetPosition=(0.4, 0, 0.2),
         distance=1.0,
-        yaw=60,
-        pitch=-10,
+        yaw=90,
+        pitch=-60,
         roll=0,
         upAxisIndex=2,
     )
@@ -416,7 +419,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
             np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
             np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
         )
-        while True:
+        reset_count = 0
+        while reset_count < 10:
             self.p.performCollisionDetection()
             is_in_contact = False
             is_in_contact = is_in_contact or (len(self.p.getContactPoints(bodyA=self.robot.id, bodyB=self.drawer_id)) > 0)
@@ -426,6 +430,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
                 np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
                 np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True
             )
+            reset_count += 1
     
     def _get_graspable_objects(self):
         return self.graspable_objects
@@ -482,8 +487,8 @@ if __name__ == "__main__":
     goal_img = obs["goal"]
     goal_state = env.goal["state"]
     import matplotlib.pyplot as plt
-    plt.imsave("cur_img.png", cur_img)
-    plt.imsave("goal_img.png", goal_img)
+    plt.imsave("cur_img.png", cur_img.transpose((1, 2, 0)))
+    plt.imsave("goal_img.png", goal_img.transpose((1, 2, 0)))
     print("goal state", goal_state, "robot_state", obs["robot_state"])
     env.start_rec("test")
     # env.oracle_agent("open_box")

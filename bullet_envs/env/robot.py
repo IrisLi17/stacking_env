@@ -215,7 +215,7 @@ class PandaRobot(object):
         self.rot_threshold = 0.1
         self.max_delta_xyz = 0.05
         self.max_delta_rot = 0.3
-        self.max_atomic_step = 50
+        self.max_atomic_step = 20
         self.graspable_objects = ()
         self.save_video = False
         c = self.p.createConstraint(self.id,
@@ -289,30 +289,30 @@ class PandaRobot(object):
                 forces=[1000] * len(self.motor_indices[7:]),
                 # positionGains=[1] * len(self.motor_indices[7:]), velocityGains=[0.1] * len(self.motor_indices[7:])
             )
-            def contact_points_info(res):
-                return {
-                    'bodyUniqueIdA': res[1],
-                    'bodyUniqueIdB': res[2],
-                    'linkIndexA': res[3],
-                    'linkIndexB': res[4],
-                    'positionOnA': res[5],
-                    'positionOnB': res[6],
-                    'contactNormalOnB': res[7],
-                    'contactDistance': res[8],
-                    'normalForce': res[9],
-                    'lateralFriction1': res[10],
-                    'lateralFrictionDir1': res[11],
-                    'lateralFriction2': res[12],
-                    'lateralFrictionDir2': res[13],
-                }
+            # def contact_points_info(res):
+            #     return {
+            #         'bodyUniqueIdA': res[1],
+            #         'bodyUniqueIdB': res[2],
+            #         'linkIndexA': res[3],
+            #         'linkIndexB': res[4],
+            #         'positionOnA': res[5],
+            #         'positionOnB': res[6],
+            #         'contactNormalOnB': res[7],
+            #         'contactDistance': res[8],
+            #         'normalForce': res[9],
+            #         'lateralFriction1': res[10],
+            #         'lateralFrictionDir1': res[11],
+            #         'lateralFriction2': res[12],
+            #         'lateralFrictionDir2': res[13],
+            #     }
                 
             for i in range(self.num_substeps):
                 self.p.stepSimulation()
-                if len(self.graspable_objects) and i % 2 == 0:
-                    contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
-                    contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
-                    contact_body_and_link1 = [(item[2], item[4]) for item in contact1]
-                    contact_body_and_link2 = [(item[2], item[4]) for item in contact2]
+                # if len(self.graspable_objects) and i % 2 == 0:
+                #     contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
+                #     contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
+                #     contact_body_and_link1 = [(item[2], item[4]) for item in contact1]
+                #     contact_body_and_link2 = [(item[2], item[4]) for item in contact2]
                     # for g in self.graspable_objects:
                     #     if g in contact_body_and_link1 or g in contact_body_and_link2:
                     #         # debug
@@ -380,6 +380,8 @@ class PandaRobot(object):
             desired_finger = self.get_finger_width() / 2 - 0.005
         done = False
         atomic_step = 0
+        previous_eef_pos = self.get_eef_position()
+        previous_eef_orn = self.get_eef_orn()
         while not done:
             # greedily move towards the desired pose
             cur_eef_pos = self.get_eef_position()
@@ -408,7 +410,15 @@ class PandaRobot(object):
                     import IPython
                     IPython.embed()
             self.control(target_eef_pos, target_eef_quat, desired_finger, relative=False, teleport=False)
-
+            # Early terminate if the robot cannot effectively move towards goal?
+            new_eef_pos = self.get_eef_position()
+            new_eef_orn = self.get_eef_orn()
+            diff_quat = quat_diff(new_eef_orn, previous_eef_orn)
+            if np.linalg.norm(previous_eef_pos - new_eef_pos) < self.pos_threshold / 2 and \
+                abs(np.arccos(np.clip(diff_quat[3], -1.0, 1.0))) * 2 < self.rot_threshold / 2:
+                break
+            previous_eef_pos = new_eef_pos
+            previous_eef_orn = new_eef_orn
             atomic_step += 1
             if atomic_step >= self.max_atomic_step:
                 break
@@ -446,8 +456,12 @@ class PandaRobot(object):
             for j in self.motor_indices[7:]:
                 self.p.resetJointState(self.id, j, width / 2)
         else:
+            # self.p.setJointMotorControlArray(
+            #     self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [width / 2] * len(self.motor_indices[7:]),
+            #     forces=[1000] * len(self.motor_indices[7:])
+            # )
             self.p.setJointMotorControlArray(
-                self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [width / 2] * len(self.motor_indices[7:]),
+                self.id, self.motor_indices[7:], self.p.VELOCITY_CONTROL, targetVelocities=[1.] * len(self.motor_indices[7:]),
             )
             step_count = 0
             while True:
@@ -456,7 +470,7 @@ class PandaRobot(object):
                     color = self.render_fn(self.p)
                     self.video_writer.append_data(color)
                 step_count += 1
-                if abs(self.get_finger_width() - width) < 2e-3 or step_count >= self.max_atomic_step:
+                if self.get_finger_width() - width > -2e-3 or step_count >= self.max_atomic_step:
                     break
             # print("move gripper step count", step_count)
     
@@ -464,8 +478,12 @@ class PandaRobot(object):
         if self.gripper_status == "close":
             return
         self.gripper_status = "close"
+        # self.p.setJointMotorControlArray(
+        #     self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [0.0] * len(self.motor_indices[7:]),
+        #     forces=[1000] * len(self.motor_indices[7:])
+        # )
         self.p.setJointMotorControlArray(
-            self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [0.0] * len(self.motor_indices[7:])
+            self.id, self.motor_indices[7:], self.p.VELOCITY_CONTROL, targetVelocities=[-1.] * len(self.motor_indices[7:]),
         )
         atomic_step = 0
         while True:
