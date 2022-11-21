@@ -4,12 +4,15 @@ import imageio
 import pybullet as p
 import pybullet_data
 import numpy as np
-from env.bullet_rotations import quat_diff, quat_mul
-from env.robot import PandaRobot
+from bullet_envs.env.bullet_rotations import quat_diff, quat_mul
+from bullet_envs.env.robot import PandaRobot
 from gym import spaces
 from gym.utils import seeding
 from pybullet_utils import bullet_client as bc
 from typing import Any, Dict, Tuple
+from collections import OrderedDict
+import pkgutil
+egl = pkgutil.get_loader('eglRenderer')
 
 
 DATAROOT = pybullet_data.getDataPath()
@@ -29,7 +32,7 @@ class BasePrimitiveEnv(gym.Env):
         self.goal = self.sample_goal()
         obs = self._get_obs()
         self.observation_space = spaces.Dict(
-            {key: spaces.Box(low=-np.inf, high=np.inf, shape=obs[key].shape) for key in obs}
+            OrderedDict([(key, spaces.Box(low=-np.inf, high=np.inf, shape=obs[key].shape)) for key in obs])
         )
         self.action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(5,))
         self.record_cfg = dict(
@@ -124,7 +127,13 @@ class BasePrimitiveEnv(gym.Env):
         self.robot.save_video = False
 
     def _setup_env(self, init_qpos=None, base_position=(0, 0, 0)):
+        # TODO: gpu rendering
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
+        plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
+        print("plugin=", plugin)
+        self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
+        self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
+        
         self.p.resetSimulation()
         self.p.setTimeStep(self.dt)
         self.p.setGravity(0., 0., -9.8)
@@ -153,14 +162,14 @@ class BasePrimitiveEnv(gym.Env):
         joint_pos = robot_state["qpos"]
         eef_pos = self.robot.get_eef_position()
         eef_euler = self.robot.get_eef_orn(as_type="euler")
-        scene = render(self.p, width=224, height=224)
+        scene = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
         return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
     
     def _get_graspable_objects(self):
         return ()
 
 
-def render(client: bc.BulletClient, width=256, height=256):
+def render(client: bc.BulletClient, width=256, height=256) -> np.ndarray:
     view_matrix = client.computeViewMatrixFromYawPitchRoll(
         cameraTargetPosition=(0.3, 0, 0.2),
         distance=1.0,
@@ -181,6 +190,8 @@ def render(client: bc.BulletClient, width=256, height=256):
     return rgb_array
 
 
+# def process_img(color, depth, cam_config):
+#     # goal: filter out robot and background, the perspective from robot?
 class BoxLidEnv(BasePrimitiveEnv):
     def __init__(self, seed=None) -> None:
         super().__init__(seed)
@@ -289,23 +300,16 @@ class BoxLidEnv(BasePrimitiveEnv):
         self.p.resetBasePositionAndOrientation(self.box_lid_id, box_lid_pose[0], box_lid_pose[1])
         self.robot.set_state(robot_state)
         return goal_dict
+    
+    def compute_reward_and_info(self):
+        cur_lid_pose = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
+        goal_lid_pose = self.goal["state"]
+        dist_lid_pos = np.linalg.norm(goal_lid_pose[0] - cur_lid_pose[0])
+        dist_lid_ang = 2 * np.arccos(quat_diff(goal_lid_pose[1], cur_lid_pose[1])[3])
+        is_success = dist_lid_pos < self.dist_threshold and dist_lid_ang < self.rot_threshold
+        reward = float(is_success) if self.reward_type == "sparse" else -dist_lid_pos * self.rew_dist_coef - dist_lid_ang * self.rew_rot_coef
+        info = {"state": np.concatenate(cur_lid_pose), "is_success": is_success}
 
-    # def oracle_agent(self):
-    #     handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
-    #     print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
-    #     # offset a little
-    #     handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
-    #     print("offset handle pose", handle_pose)
-    #     action = np.zeros(5)
-    #     action[0] = PrimitiveType.MOVE_APPROACH
-    #     eef_pos = handle_pose[0] + np.array([0.0, 0.0, 0.005])
-    #     action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
-    #     handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
-    #     print("handle_euler", handle_euler)
-    #     action[4] = (handle_euler[2] % (np.pi)) / (np.pi / 2)
-    #     if action[4] > 1:
-    #         action[4] -= 2
-    #     return action
     def _eef_pos_to_action(self, eef_pos):
         return (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
 
@@ -369,9 +373,11 @@ class BoxLidEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnv(BasePrimitiveEnv):
-    def __init__(self, seed=None) -> None:
+    def __init__(self, seed=None, reward_type="dense") -> None:
         super().__init__(seed)
         self.approach_dist = 0.1
+        self.handle_pos_threshold = 0.01
+        self.reward_type = reward_type
     
     def _setup_callback(self):
         self.drawer_id = self.p.loadURDF(
@@ -436,16 +442,41 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
-        goal_img = render(self.p, width=224, height=224)
+        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (goal_drawer_joint,), 'img': goal_img}
 
         # recover state
         self.p.resetJointState(self.drawer_id, self.drawer_joint, drawer_joint_state[0], drawer_joint_state[1])
         self.robot.set_state(robot_state)
         return goal_dict
+    
+    def compute_reward_and_info(self):
+        cur_handle_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
+        handle_dist = abs(self.goal["state"][0] - cur_handle_joint)
+        is_success = handle_dist < self.handle_pos_threshold
+        reward = float(is_success) if self.reward_type == "sparse" else -handle_dist
+        info = {'handle_joint': cur_handle_joint, 'is_success': is_success}
+        return reward, info
+    
+    def oracle_agent(self):
+        handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
+        print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
+        # offset a little
+        handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
+        print("offset handle pose", handle_pose)
+        action = np.zeros(5)
+        action[0] = PrimitiveType.MOVE_APPROACH
+        eef_pos = handle_pose[0] + np.array([0.0, 0.0, 0.005])
+        action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
+        handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
+        print("handle_euler", handle_euler)
+        action[4] = (handle_euler[2] % (np.pi)) / (np.pi / 2)
+        if action[4] > 1:
+            action[4] -= 2
+        return action
 
 if __name__ == "__main__":
-    env = BoxLidEnv()
+    env = DrawerObjEnv()
     obs = env.reset()
     cur_img = obs["img"]
     goal_img = obs["goal"]

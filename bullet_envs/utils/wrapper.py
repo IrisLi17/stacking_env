@@ -1,6 +1,8 @@
 import gym
+import gym.spaces
+import numpy as np
 import torch
-from vec_env.base_vec_env import VecEnvWrapper
+from bullet_envs.vec_env.base_vec_env import VecEnvWrapper
 from collections import deque
 
 
@@ -125,6 +127,47 @@ class FlexibleTimeLimitWrapper(gym.Wrapper):
         return self.env.reset(**kwargs)
 
 
+class MVPVecPyTorch(VecEnvWrapper):
+    def __init__(self, venv, device, observation_space=None, action_space=None, ):
+        super().__init__(venv, observation_space, action_space)
+        self.device = device
+        import mvp
+        self.mvp_model = mvp.load("vitb-mae-egosoup")
+        self.mvp_model.to(self.device)
+        self.mvp_model.freeze()
+        self.reset()
+    
+    def reset(self):
+        obs = self.venv.reset()
+        assert "img" in obs.keys() and "goal" in obs.keys()
+        scene_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["img"]).float().to(self.device))
+        scene_feat = self.mvp_model.forward_norm(scene_feat)
+        goal_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["goal"]).float().to(self.device))
+        goal_feat = self.mvp_model.forward_norm(goal_feat)
+        robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
+        obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
+        if isinstance(self.observation_space, gym.spaces.Dict):
+            self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(obs.shape[-1],))
+        return obs
+    
+    def step_async(self, actions):
+        actions = actions.cpu().numpy()
+        self.venv.step_async(actions)
+    
+    def step_wait(self):
+        obs, reward, done, info = self.venv.step_wait()
+        assert "img" in obs.keys() and "goal" in obs.keys()
+        with torch.no_grad():
+            scene_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["img"]).float().to(self.device))
+            scene_feat = self.mvp_model.forward_norm(scene_feat)
+            goal_feat = self.mvp_model.extract_feat(torch.from_numpy(obs["goal"]).float().to(self.device))
+            goal_feat = self.mvp_model.forward_norm(goal_feat)
+        robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
+        obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
+        reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
+        return obs, reward, done, info
+
+
 class VecPyTorch(VecEnvWrapper):
     def __init__(self, venv, device):
         """Return only every `skip`-th frame"""
@@ -150,3 +193,4 @@ class VecPyTorch(VecEnvWrapper):
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         # reward = np.expand_dims(reward, axis=1).astype(np.float32)
         return obs, reward, done, info
+

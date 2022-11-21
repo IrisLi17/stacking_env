@@ -1,5 +1,6 @@
 import gym
-from env.robot_arm_env import ArmStack, ArmPickAndPlace
+from bullet_envs.env.robot_arm_env import ArmStack, ArmPickAndPlace
+from bullet_envs.env.primitive_env import DrawerObjEnv
 
 
 gym.register(
@@ -15,4 +16,8 @@ gym.register(
     kwargs=dict(
         robot="panda", reward_type="sparse", n_object=6, action_dim=4
     )
+)
+
+gym.register(
+    "BulletDrawer-v1", entry_point=DrawerObjEnv, max_episode_steps=50
 )

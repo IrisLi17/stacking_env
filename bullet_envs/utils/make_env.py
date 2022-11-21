@@ -1,13 +1,13 @@
 import argparse
 import os
 
-from env.robot_arm_env import ArmStack
+from bullet_envs.env.robot_arm_env import ArmStack
 # from fetch_stack import FetchStackEnv
 
 import gym
 from gym.wrappers import FlattenDictWrapper
-from utils.monitor import Monitor
-from utils.wrapper import DoneOnSuccessWrapper, SwitchGoalWrapper
+from bullet_envs.utils.monitor import Monitor
+from bullet_envs.utils.wrapper import DoneOnSuccessWrapper, SwitchGoalWrapper
 import subprocess
 
 

@@ -6,7 +6,7 @@ from gym import spaces
 from gym.utils import seeding
 import numpy as np
 import torch
-from env.bullet_rotations import mat2quat, quat_mul
+from bullet_envs.env.bullet_rotations import mat2quat, quat_mul
 
 
 DATAROOT = pybullet_data.getDataPath()
@@ -45,10 +45,10 @@ class ArmGoalEnv(gym.Env):
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
         )
         if robot == "xarm":
-            from env.robot import XArmRobot
+            from bullet_envs.env.robot import XArmRobot
             self.robot = XArmRobot(self.p, init_qpos, base_position)
         elif robot == "panda":
-            from env.robot import PandaRobot
+            from bullet_envs.env.robot import PandaRobot
             self.robot = PandaRobot(self.p, init_qpos, base_position)
         else:
             raise NotImplementedError

@@ -1,6 +1,6 @@
 import pybullet as p 
 import pybullet_utils.bullet_client as bc
-from env.bullet_rotations import quat_diff, quat_mul
+from bullet_envs.env.bullet_rotations import quat_diff, quat_mul
 import numpy as np
 import os
 
