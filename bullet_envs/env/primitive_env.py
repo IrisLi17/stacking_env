@@ -20,9 +20,8 @@ DATAROOT = pybullet_data.getDataPath()
 
 class PrimitiveType:
     MOVE_DIRECT = 0
-    MOVE_APPROACH = 1
-    GRIPPER_OPEN = 2
-    GRIPPER_GRASP = 3
+    GRIPPER_OPEN = 1
+    GRIPPER_GRASP = 2
 
 
 class BasePrimitiveEnv(gym.Env):
@@ -70,7 +69,7 @@ class BasePrimitiveEnv(gym.Env):
         primitive_type = int(np.round(action[0]))
         action[1:] = np.clip(action[1:], -1.0, 1.0)
         # t0 = time.time()
-        if primitive_type in [PrimitiveType.MOVE_DIRECT, PrimitiveType.MOVE_APPROACH]:
+        if primitive_type == PrimitiveType.MOVE_DIRECT:
             # Add neutral value and scale
             eef_pos = action[1:4] * (self.robot_eef_range[1] - self.robot_eef_range[0]) / 2 + np.mean(self.robot_eef_range, axis=0)
             eef_euler = np.array([np.pi, 0., action[4] * np.pi / 2])
@@ -78,10 +77,7 @@ class BasePrimitiveEnv(gym.Env):
             # if eef_euler[0] > np.pi:
             #     eef_euler[0] -= 2 * np.pi
             eef_quat = self.p.getQuaternionFromEuler(eef_euler)
-        if primitive_type == PrimitiveType.MOVE_DIRECT:
             self.robot.move_direct_ee_pose(eef_pos, eef_quat)
-        elif primitive_type == PrimitiveType.MOVE_APPROACH:
-            self.robot.move_approach_ee_pose(eef_pos, eef_quat, approach_dist=self.approach_dist)
         elif primitive_type == PrimitiveType.GRIPPER_OPEN:
             self.robot.gripper_move("open")
         elif primitive_type == PrimitiveType.GRIPPER_GRASP:
@@ -130,7 +126,6 @@ class BasePrimitiveEnv(gym.Env):
         self.robot.save_video = False
 
     def _setup_env(self, init_qpos=None, base_position=(0, 0, 0)):
-        # TODO: gpu rendering
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
         plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
         print("plugin=", plugin)
@@ -165,14 +160,35 @@ class BasePrimitiveEnv(gym.Env):
         joint_pos = robot_state["qpos"]
         eef_pos = self.robot.get_eef_position()
         eef_euler = self.robot.get_eef_orn(as_type="euler")
-        scene = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
+        scene = self._get_ego_view(width=224, height=224).transpose((2, 0, 1))[:3]
         return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
     
     def _get_graspable_objects(self):
         return ()
+    
+    def _get_ego_view(self, width, height):
+        eef_pos = self.robot.get_eef_position().reshape((3, 1))
+        eef_rot = np.array(self.p.getMatrixFromQuaternion(self.robot.get_eef_orn())).reshape((3, 3))
+        # TODO
+        eef_t_cam = np.array([0.06, 0.0, -0.04]).reshape((3, 1))
+        eye_position = eef_rot @ eef_t_cam + eef_pos
+        target_position = eye_position + eef_rot @ np.array([0, 0, 1]).reshape((3, 1))
+        up_vector = eef_rot @ np.array([1, 0, 0])
+        # up_vector = np.array([0, 0, -1])
+        view_matrix = self.p.computeViewMatrix(eye_position, target_position, up_vector)
+        proj_matrix = self.p.computeProjectionMatrixFOV(
+            fov=120, aspect=1.0, nearVal=0.01, farVal=10.0
+        )
+        (_, _, px, _, _) = self.p.getCameraImage(
+            width=width, height=height, viewMatrix=view_matrix, projectionMatrix=proj_matrix,
+        )
+        rgb_array = np.array(px, dtype=np.uint8)
+        rgb_array = np.reshape(rgb_array, (height, width, 4))
+        return rgb_array
 
 
 def render(client: bc.BulletClient, width=256, height=256) -> np.ndarray:
+    # TODO: eye on hand
     view_matrix = client.computeViewMatrixFromYawPitchRoll(
         cameraTargetPosition=(0.4, 0, 0.2),
         distance=1.0,
@@ -299,7 +315,7 @@ class BoxLidEnv(BasePrimitiveEnv):
         self.p.resetBasePositionAndOrientation(self.box_lid_id, goal_lid_pos, goal_lid_quat)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
-        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
+        goal_img = self._get_ego_view(width=224, height=224).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (goal_lid_pos, goal_lid_quat), 'img': goal_img}
 
         # recover state
@@ -331,7 +347,7 @@ class BoxLidEnv(BasePrimitiveEnv):
             # move to lid
             lid_pose = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
             action = np.zeros(5)
-            action[0] = PrimitiveType.MOVE_APPROACH
+            action[0] = PrimitiveType.MOVE_DIRECT
             eef_pos = lid_pose[0]
             action[1:4] = self._eef_pos_to_action(eef_pos)
             self.step(action)
@@ -347,7 +363,7 @@ class BoxLidEnv(BasePrimitiveEnv):
                 new_pos = base_pos + np.array([0., -0.25, 0.02])
             else:
                 new_pos = base_pos + np.array([0., 0.25, 0.02])
-            action = np.concatenate([[PrimitiveType.MOVE_APPROACH], self._eef_pos_to_action(new_pos), [0.]])
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(new_pos), [0.]])
             self.step(action)
             # release
             action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], [0., 0., 0., 0.]])
@@ -358,7 +374,7 @@ class BoxLidEnv(BasePrimitiveEnv):
         elif task == "close_box":
             lid_pose = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
             lid_yaw = self.p.getEulerFromQuaternion(lid_pose[1])[2]
-            action = np.concatenate([[PrimitiveType.MOVE_APPROACH], self._eef_pos_to_action(lid_pose[0]), [lid_yaw / (np.pi / 2)]])
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(lid_pose[0]), [lid_yaw / (np.pi / 2)]])
             self.step(action)
             # grasp
             action = np.array([PrimitiveType.GRIPPER_GRASP, 0., 0., 0., 0.])
@@ -368,7 +384,7 @@ class BoxLidEnv(BasePrimitiveEnv):
             self.step(action)
             # move to box
             box_pos = self.p.getBasePositionAndOrientation(self.box_base_id)[0]
-            action = np.concatenate([[PrimitiveType.MOVE_APPROACH], self._eef_pos_to_action(box_pos + np.array([0., 0., 0.1])), [0.]])
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(box_pos + np.array([0., 0., 0.1])), [0.]])
             self.step(action)
             # release
             action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], [0., 0., 0., 0.]])
@@ -448,10 +464,11 @@ class DrawerObjEnv(BasePrimitiveEnv):
         goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
 
         # set into the environment to get image
+        self.robot.control(np.array([0.4, 0.0, 0.25]), np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True)
         self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
-        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
+        goal_img = self._get_ego_view(width=224, height=224).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (goal_drawer_joint,), 'img': goal_img}
 
         # recover state
@@ -476,7 +493,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
             handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
             print("offset handle pose", handle_pose)
             action = np.zeros(5)
-            action[0] = PrimitiveType.MOVE_APPROACH
+            action[0] = PrimitiveType.MOVE_DIRECT
             eef_pos = handle_pose[0] + np.array([0.0, 0.0, 0.005])
             action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
             handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
