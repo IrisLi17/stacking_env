@@ -173,11 +173,17 @@ class XArmRobot(object):
 
 
 class PandaRobot(object):
-    def __init__(self, physics_client: bc.BulletClient, init_qpos=None, base_pos=(0., 0., 0.), base_orn=(0, 0, 0, 1)):
+    def __init__(
+        self, physics_client: bc.BulletClient, init_qpos=None, base_pos=(0., 0., 0.), base_orn=(0, 0, 0, 1),
+        is_visible=True
+    ):
         self.p = physics_client
         self.num_substeps = 20
-        import pybullet_data
-        data_root = pybullet_data.getDataPath()
+        if is_visible:
+            import pybullet_data
+            data_root = pybullet_data.getDataPath()
+        else:
+            data_root = os.path.join(os.path.dirname(__file__), "assets")
         self.urdf_path = os.path.join(data_root, 'franka_panda/panda.urdf')
         self.base_pos = base_pos
         self.base_orn = base_orn

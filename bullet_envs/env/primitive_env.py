@@ -141,11 +141,12 @@ class BasePrimitiveEnv(gym.Env):
             os.path.join(DATAROOT, "table/table.urdf"), 
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
         )
-        self.robot = PandaRobot(self.p, init_qpos, base_position)
-        robot_eef_center = np.array([0.5, 0.0, 0.15])
+        self.robot = PandaRobot(self.p, init_qpos, base_position, is_visible=False)
+        _robot_eef_low = np.array([0.3, -0.25, 0.0])
+        _robot_eef_high = np.array([0.6, 0.25, 0.3])
+        # robot_eef_center = np.array([0.5, 0.0, 0.15])
         self.robot_eef_range = np.stack([
-            robot_eef_center - np.array([0.2, 0.25, 0.15]),
-            robot_eef_center + np.array([0.2, 0.25, 0.15])
+            _robot_eef_low, _robot_eef_high
         ], axis=0)
         self._setup_callback()
     
@@ -160,7 +161,7 @@ class BasePrimitiveEnv(gym.Env):
         joint_pos = robot_state["qpos"]
         eef_pos = self.robot.get_eef_position()
         eef_euler = self.robot.get_eef_orn(as_type="euler")
-        scene = self._get_ego_view(width=224, height=224).transpose((2, 0, 1))[:3]
+        scene = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
         return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
     
     def _get_graspable_objects(self):
@@ -190,9 +191,9 @@ class BasePrimitiveEnv(gym.Env):
 def render(client: bc.BulletClient, width=256, height=256) -> np.ndarray:
     # TODO: eye on hand
     view_matrix = client.computeViewMatrixFromYawPitchRoll(
-        cameraTargetPosition=(0.4, 0, 0.2),
-        distance=1.0,
-        yaw=90,
+        cameraTargetPosition=(0.45, 0, 0.0),
+        distance=0.6,
+        yaw=-90,
         pitch=-60,
         roll=0,
         upAxisIndex=2,
@@ -315,7 +316,7 @@ class BoxLidEnv(BasePrimitiveEnv):
         self.p.resetBasePositionAndOrientation(self.box_lid_id, goal_lid_pos, goal_lid_quat)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
-        goal_img = self._get_ego_view(width=224, height=224).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (goal_lid_pos, goal_lid_quat), 'img': goal_img}
 
         # recover state
@@ -409,7 +410,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
             globalScaling=0.125
         )
         self.drawer_range = np.array([
-            [self.robot_eef_range[0][0] + 0.05, self.robot_eef_range[0][1] + 0.05, 0.05],
+            [self.robot_eef_range[0][0] + 0.15, self.robot_eef_range[0][1] + 0.05, 0.05],
             [self.robot_eef_range[1][0], self.robot_eef_range[1][1] - 0.05, 0.05]
         ])
         for j in range(self.p.getNumJoints(self.drawer_id)):
@@ -425,15 +426,25 @@ class DrawerObjEnv(BasePrimitiveEnv):
             self.graspable_objects = ((self.drawer_id, self.drawer_handle_link),)
 
     def _reset_sim(self):
-        rand_angle = np.random.uniform(-np.pi, 0.)
-        self.p.resetBasePositionAndOrientation(
-            self.drawer_id, 
-            np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
-            # ((self.drawer_range[0][0] + self.drawer_range[1][0]) / 2, 0.1, self.drawer_range[0][2]),
-            (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
-        )
-        # reset drawer joint
-        self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
+        def _randomize_drawer():
+            rand_angle = np.random.uniform(-np.pi, 0.)
+            # rand_angle = 0
+            self.p.resetBasePositionAndOrientation(
+                self.drawer_id, 
+                np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
+                # ((self.drawer_range[0][0] + self.drawer_range[1][0]) / 2, 0.1, self.drawer_range[0][2]),
+                (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
+            )
+            # reset drawer joint
+            self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
+        _randomize_drawer()
+        _count = 0
+        # check handle position
+        handle_position = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+        while _count < 10 and not (self.robot_eef_range[0][0] <= handle_position[0] <= self.robot_eef_range[1][0] and self.robot_eef_range[0][1] <= handle_position[1] <= self.robot_eef_range[1][1]):
+            _randomize_drawer()
+            handle_position = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+            _count += 1
         # reset robot
         self.robot.control(
             np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
@@ -468,7 +479,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
-        goal_img = self._get_ego_view(width=224, height=224).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (goal_drawer_joint,), 'img': goal_img}
 
         # recover state
@@ -485,10 +496,19 @@ class DrawerObjEnv(BasePrimitiveEnv):
         return reward, info
     
     def oracle_agent(self, mode="open_drawer"):
+        def eef_pos_to_action(eef_pos):
+            return (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
         if mode == "open_drawer":
+            # lift up
+            cur_robot_eef = self.robot.get_eef_position()
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], eef_pos_to_action(cur_robot_eef)[:2], [1.0, 0.0]])
+            self.step(action)
+            # move to above handle
             handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
             drawer_center = self.p.getBasePositionAndOrientation(self.drawer_id)
             print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], eef_pos_to_action(handle_pose[0])[:2], [1.0, 0.0]])
+            self.step(action)
             # offset a little
             handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
             print("offset handle pose", handle_pose)
