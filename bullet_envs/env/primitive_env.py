@@ -491,7 +491,12 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_handle_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         handle_dist = abs(self.goal["state"][0] - cur_handle_joint)
         is_success = handle_dist < self.handle_pos_threshold
-        reward = float(is_success) if self.reward_type == "sparse" else -handle_dist
+        if self.reward_type == "sparse":
+            reward = float(is_success)
+        else:
+            cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+            eef_dist = np.linalg.norm(self.robot.get_eef_position() - cur_handle_pos)
+            reward = -0.2 * eef_dist - handle_dist + float(is_success)
         info = {'handle_joint': cur_handle_joint, 'is_success': is_success}
         return reward, info
     
