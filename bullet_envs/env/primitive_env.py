@@ -141,9 +141,9 @@ class BasePrimitiveEnv(gym.Env):
             os.path.join(DATAROOT, "table/table.urdf"), 
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
         )
-        self.robot = PandaRobot(self.p, init_qpos, base_position, is_visible=False)
-        _robot_eef_low = np.array([0.3, -0.25, 0.0])
-        _robot_eef_high = np.array([0.6, 0.25, 0.3])
+        self.robot = PandaRobot(self.p, init_qpos, base_position, is_visible=True)
+        _robot_eef_low = np.array([0.3, -0.35, 0.0])
+        _robot_eef_high = np.array([0.6, 0.35, 0.3])
         # robot_eef_center = np.array([0.5, 0.0, 0.15])
         self.robot_eef_range = np.stack([
             _robot_eef_low, _robot_eef_high
@@ -410,8 +410,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
             globalScaling=0.125
         )
         self.drawer_range = np.array([
-            [self.robot_eef_range[0][0] + 0.15, self.robot_eef_range[0][1] + 0.05, 0.05],
-            [self.robot_eef_range[1][0], self.robot_eef_range[1][1] - 0.05, 0.05]
+            [0.45, 0.1, 0.1],
+            [0.45, 0.1, 0.1]
         ])
         for j in range(self.p.getNumJoints(self.drawer_id)):
             joint_info = self.p.getJointInfo(self.drawer_id, j)
@@ -427,8 +427,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
     def _reset_sim(self):
         def _randomize_drawer():
-            rand_angle = np.random.uniform(-np.pi, 0.)
-            # rand_angle = 0
+            # rand_angle = np.random.uniform(-np.pi, 0.)
+            rand_angle = 0
             self.p.resetBasePositionAndOrientation(
                 self.drawer_id, 
                 np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
@@ -436,7 +436,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
                 (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
             )
             # reset drawer joint
-            self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
+            self.p.resetJointState(self.drawer_id, self.drawer_joint, np.random.uniform(*self.drawer_handle_range))
         _randomize_drawer()
         _count = 0
         # check handle position
@@ -473,14 +473,24 @@ class DrawerObjEnv(BasePrimitiveEnv):
         
         # pair of underlying state and goal image
         goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
+        self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
+        _handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+        _count = 0
+        while _count < 10 and not (self.robot_eef_range[0][0] <= _handle_pos[0] <= self.robot_eef_range[1][0] and self.robot_eef_range[0][1] <= _handle_pos[1] <= self.robot_eef_range[1][1]):
+            goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
+            self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
+            _handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+            _count += 1
 
         # set into the environment to get image
         self.robot.control(np.array([0.4, 0.0, 0.25]), np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True)
         self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
+        cur_drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
+        cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
-        goal_dict = {'state': (goal_drawer_joint,), 'img': goal_img}
+        goal_dict = {'state': (cur_drawer_joint, cur_handle_pos), 'img': goal_img}
 
         # recover state
         self.p.resetJointState(self.drawer_id, self.drawer_joint, drawer_joint_state[0], drawer_joint_state[1])
@@ -496,7 +506,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         else:
             cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
             eef_dist = np.linalg.norm(self.robot.get_eef_position() - cur_handle_pos)
-            reward = -0.2 * eef_dist - handle_dist + float(is_success)
+            reward = -0.05 * eef_dist - 0.2 * handle_dist + float(is_success)
         info = {'handle_joint': cur_handle_joint, 'is_success': is_success}
         return reward, info
     
@@ -511,59 +521,75 @@ class DrawerObjEnv(BasePrimitiveEnv):
             # move to above handle
             handle_pose = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[:2]
             drawer_center = self.p.getBasePositionAndOrientation(self.drawer_id)
-            print("handle_pose", handle_pose, "base pose", self.p.getBasePositionAndOrientation(self.drawer_id))
             action = np.concatenate([[PrimitiveType.MOVE_DIRECT], eef_pos_to_action(handle_pose[0])[:2], [1.0, 0.0]])
             self.step(action)
             # offset a little
-            handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.02, 0.]), np.array([0., 0., 0., 1.]))
-            print("offset handle pose", handle_pose)
+            handle_pose = self.p.multiplyTransforms(handle_pose[0], handle_pose[1], np.array([0., -0.0, 0.]), np.array([0., 0., 0., 1.]))
             action = np.zeros(5)
             action[0] = PrimitiveType.MOVE_DIRECT
-            eef_pos = handle_pose[0] + np.array([0.0, 0.0, 0.005])
+            eef_pos = handle_pose[0] + np.array([0.0, 0.0, -0.005])
             action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
             handle_euler = self.p.getEulerFromQuaternion(quat_diff(handle_pose[1], np.array([0., np.sin(1.57 / 2), 0., np.cos(1.57 / 2)])))
-            print("handle_euler", handle_euler)
             action[4] = (handle_euler[2] % (np.pi)) / (np.pi / 2)
             if action[4] > 1:
                 action[4] -= 2
             self.step(action)
+            _count = 0
+            while _count < 5 and np.linalg.norm(self.robot.get_eef_position() - eef_pos) > 0.01:
+                self.step(action)
+                _count += 1
             # grasp
             action = np.array([PrimitiveType.GRIPPER_GRASP, 0., 0., 0., 0.])
-            self.step(action)
+            _, reward, done, info = self.step(action)
             # move
-            move_dir = (np.array(handle_pose[0]) - np.array(drawer_center[0]))[:2]
-            move_dir = move_dir / np.linalg.norm(move_dir)
-            eef_pos = eef_pos + 0.2 * np.concatenate([move_dir, [0.]])
-            action = np.zeros(5)
-            action[0] = PrimitiveType.MOVE_DIRECT
-            action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
-            action[4] = (handle_euler[2] % np.pi) / (np.pi / 2)
-            if action[4] > 1:
-                action[4] -= 2
-            self.step(action)
+            # move_dir = (np.array(handle_pose[0]) - np.array(drawer_center[0]))[:2]
+            # move_dir = move_dir / np.linalg.norm(move_dir)
+            # eef_pos = eef_pos + 0.2 * np.concatenate([move_dir, [0.]])
+            attemp = 0
+            while attemp < 5 and abs(self.p.getJointState(self.drawer_id, self.drawer_joint)[0] - self.goal["state"][0]) > 0.01:
+                handle_position = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+                print("goal", self.goal["state"][1], "handle_position", handle_position, "robot eef", self.robot.get_eef_position())
+                eef_pos = np.array(self.goal["state"][1]) - np.array(handle_position) + self.robot.get_eef_position()
+                action = np.zeros(5)
+                action[0] = PrimitiveType.MOVE_DIRECT
+                action[1:4] = (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
+                action[4] = (handle_euler[2] % np.pi) / (np.pi / 2)
+                if action[4] > 1:
+                    action[4] -= 2
+                _, reward, done, info = self.step(action)
+                attemp += 1
+                print("attemp", attemp, "after moving handle", self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0], "goal", self.goal["state"][1])
             # release
-            action = np.array([PrimitiveType.GRIPPER_OPEN, 0., 0., 0., 0.])
-            self.step(action)
+            # action = np.array([PrimitiveType.GRIPPER_OPEN, 0., 0., 0., 0.])
+            # _, reward, done, info = self.step(action)
+            return info
 
 
 if __name__ == "__main__":
     env = DrawerObjEnv()
-    obs = env.reset()
-    cur_img = obs["img"]
-    goal_img = obs["goal"]
-    goal_state = env.goal["state"]
-    import matplotlib.pyplot as plt
-    plt.imsave("cur_img.png", cur_img.transpose((1, 2, 0)))
-    plt.imsave("goal_img.png", goal_img.transpose((1, 2, 0)))
-    print("goal state", goal_state, "robot_state", obs["robot_state"])
+    is_success = []
     env.start_rec("test")
-    env.oracle_agent()
-    # env.oracle_agent("open_box")
-    # env.oracle_agent("close_box")
-    # for i in range(50):
-    #     action = np.random.uniform(-1.0, 1.0, size=(5,))
-    #     action[0] = np.random.randint(4)
-    # #     if i == 0:
-    # #     print("Action", action)
-    #     env.step(action)
+    for i in range(20):
+        obs = env.reset()
+        cur_img = obs["img"]
+        goal_img = obs["goal"]
+        goal_state = env.goal["state"]
+        # import matplotlib.pyplot as plt
+        # plt.imsave("cur_img.png", cur_img.transpose((1, 2, 0)))
+        # plt.imsave("goal_img.png", goal_img.transpose((1, 2, 0)))
+        print("goal state", goal_state)
+        # env.start_rec("test")
+        info = env.oracle_agent()
+        is_success.append(info["is_success"])
+        # env.oracle_agent("open_box")
+        # env.oracle_agent("close_box")
+        # for i in range(50):
+        #     action = np.random.uniform(-1.0, 1.0, size=(5,))
+        #     action[0] = np.random.randint(4)
+        # #     if i == 0:
+        # #     print("Action", action)
+        #     env.step(action)
+        # env.end_rec()
+        print("is_success", info["is_success"])
     env.end_rec()
+    print("mean success", np.mean(is_success))
