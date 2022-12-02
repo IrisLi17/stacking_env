@@ -503,7 +503,18 @@ class DrawerObjEnv(BasePrimitiveEnv):
         is_success = handle_dist < self.handle_pos_threshold
         if self.reward_type == "sparse":
             reward = float(is_success)
-        else:
+        elif self.reward_type == "dense_stage":
+            reward_stages = [-1.0, -0.5, 0.0]
+            cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
+            eef_dist = np.linalg.norm(self.robot.get_eef_position() - cur_handle_pos)
+            if eef_dist > 0.01:
+                reward = reward_stages[0] + np.clip(1 - eef_dist, 0.0, 1.0) * (reward_stages[1] - reward_stages[0])
+            elif handle_dist >= self.handle_pos_threshold:
+                reward = reward_stages[1] + (1 - handle_dist / (self.drawer_handle_range[1] - self.drawer_handle_range[0])) * (reward_stages[2] - reward_stages[1])
+            else:
+                assert is_success
+                reward = 1.0
+        elif self.reward_type == "dense":
             cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
             eef_dist = np.linalg.norm(self.robot.get_eef_position() - cur_handle_pos)
             reward = -0.05 * eef_dist - 0.2 * handle_dist + float(is_success)
