@@ -173,7 +173,8 @@ class MVPVecPyTorch(VecEnvWrapper):
             goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
             goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
-        obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
+        goal_robot_config = torch.from_numpy(obs["goal_robot_config"]).float().to(self.device)
+        obs = torch.cat([scene_feat, robot_state, goal_feat, goal_robot_config], dim=-1)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         return obs, reward, done, info
 
