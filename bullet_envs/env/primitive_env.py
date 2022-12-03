@@ -159,12 +159,9 @@ class BasePrimitiveEnv(gym.Env):
         pass
 
     def _get_obs(self):
-        robot_state = self.robot.get_state()
-        joint_pos = robot_state["qpos"]
-        eef_pos = self.robot.get_eef_position()
-        eef_euler = self.robot.get_eef_orn(as_type="euler")
+        robot_obs = self.robot.get_obs()
         scene = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
-        return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
+        return {"img": scene, "robot_state": robot_obs, "goal": self.goal["img"], "goal_robot_config": self.goal["robot_config"]}
     
     def _get_graspable_objects(self):
         return ()
@@ -496,14 +493,16 @@ class DrawerObjEnv(BasePrimitiveEnv):
             _count += 1
 
         # set into the environment to get image
-        self.robot.control(np.array([0.4, 0.0, 0.25]), np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True)
+        _robot_xyz = np.random.uniform([0.4, -0.05, 0.25], [0.5, 0.05, 0.3])
+        self.robot.control(_robot_xyz, np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True)
         self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
         cur_drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         goal_img = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
-        goal_dict = {'state': (cur_drawer_joint, cur_handle_pos), 'img': goal_img}
+        goal_robot_config = self.robot.get_obs()
+        goal_dict = {'state': (cur_drawer_joint, cur_handle_pos), 'img': goal_img, 'robot_config': goal_robot_config}
 
         # recover state
         self.p.resetJointState(self.drawer_id, self.drawer_joint, drawer_joint_state[0], drawer_joint_state[1])
