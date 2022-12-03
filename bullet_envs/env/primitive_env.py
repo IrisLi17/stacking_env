@@ -12,6 +12,7 @@ from gym.utils import seeding
 from pybullet_utils import bullet_client as bc
 from typing import Any, Dict, Tuple
 from collections import OrderedDict
+from functools import partial
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
 
@@ -25,9 +26,10 @@ class PrimitiveType:
 
 
 class BasePrimitiveEnv(gym.Env):
-    def __init__(self, seed=None) -> None:
+    def __init__(self, seed=None, view_mode="third") -> None:
         super().__init__()
         self.seed(seed)
+        self.view_mode = view_mode
         self._setup_env()
         self.goal = self.sample_goal()
         obs = self._get_obs()
@@ -55,7 +57,7 @@ class BasePrimitiveEnv(gym.Env):
             gripper_status = "open"
         else:
             gripper_status = "close"
-        self.robot.reset_primitive(gripper_status, self._get_graspable_objects(), render)
+        self.robot.reset_primitive(gripper_status, self._get_graspable_objects(), partial(render, robot=self.robot, view_mode=self.view_mode))
         # sample goal
         self.goal = self.sample_goal()
         obs = self._get_obs()
@@ -99,7 +101,7 @@ class BasePrimitiveEnv(gym.Env):
         return reward, info
     
     def render(self, width=500, height=500):
-        return render(self.p, width, height)
+        return render(self.p, width, height, self.robot, self.view_mode)
 
     def start_rec(self, video_filename):
         assert self.record_cfg
@@ -161,7 +163,7 @@ class BasePrimitiveEnv(gym.Env):
         joint_pos = robot_state["qpos"]
         eef_pos = self.robot.get_eef_position()
         eef_euler = self.robot.get_eef_orn(as_type="euler")
-        scene = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
+        scene = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
         return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
     
     def _get_graspable_objects(self):
@@ -188,19 +190,34 @@ class BasePrimitiveEnv(gym.Env):
         return rgb_array
 
 
-def render(client: bc.BulletClient, width=256, height=256) -> np.ndarray:
-    # TODO: eye on hand
-    view_matrix = client.computeViewMatrixFromYawPitchRoll(
-        cameraTargetPosition=(0.45, 0, 0.0),
-        distance=0.6,
-        yaw=-90,
-        pitch=-60,
-        roll=0,
-        upAxisIndex=2,
-    )
-    proj_matrix = client.computeProjectionMatrixFOV(
-        fov=60, aspect=1.0, nearVal=0.1, farVal=100.0
-    )
+def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third") -> np.ndarray:
+    if view_mode == "third":
+        view_matrix = client.computeViewMatrixFromYawPitchRoll(
+            cameraTargetPosition=(0.45, 0, 0.0),
+            distance=0.6,
+            yaw=-90,
+            pitch=-60,
+            roll=0,
+            upAxisIndex=2,
+        )
+        proj_matrix = client.computeProjectionMatrixFOV(
+            fov=60, aspect=1.0, nearVal=0.1, farVal=100.0
+        )
+    elif view_mode == "ego":
+        eef_pos = robot.get_eef_position().reshape((3, 1))
+        eef_rot = np.array(client.getMatrixFromQuaternion(robot.get_eef_orn())).reshape((3, 3))
+        # TODO
+        eef_t_cam = np.array([0.06, 0.0, -0.04]).reshape((3, 1))
+        eye_position = eef_rot @ eef_t_cam + eef_pos
+        target_position = eye_position + eef_rot @ np.array([0, 0, 1]).reshape((3, 1))
+        up_vector = eef_rot @ np.array([1, 0, 0])
+        # up_vector = np.array([0, 0, -1])
+        view_matrix = client.computeViewMatrix(eye_position, target_position, up_vector)
+        proj_matrix = client.computeProjectionMatrixFOV(
+            fov=120, aspect=1.0, nearVal=0.01, farVal=10.0
+        )
+    else:
+        raise NotImplementedError
     (_, _, px, _, _) = client.getCameraImage(
         width=width, height=height, viewMatrix=view_matrix, projectionMatrix=proj_matrix,
     )
@@ -260,26 +277,22 @@ class BoxLidEnv(BasePrimitiveEnv):
             self.graspable_objects = ((self.box_lid_id, self.box_lid_link),)
     
     def _reset_sim(self):
-        # reset drawer
-        # rand_angle = np.random.uniform(-np.pi, 0.)
-        # self.p.resetBasePositionAndOrientation(
-        #     self.drawer_id, 
-        #     np.random.uniform(self.drawer_range[0], self.drawer_range[1]),
-        #     # ((self.drawer_range[0][0] + self.drawer_range[1][0]) / 2, 0.1, self.drawer_range[0][2]),
-        #     (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
-        # )
-        # # reset drawer joint
-        # self.p.resetJointState(self.drawer_id, 0, np.random.uniform(*self.drawer_handle_range))
-        
         # reset box
         box_xy = np.random.uniform(
             low=self.box_range[0], high=self.box_range[1],
         )
+        # reset lid
+        if np.random.uniform(0, 1) < 0.5:
+            lid_xyz = np.concatenate([box_xy, [0.095]])
+        else:
+            lid_xyz = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.02]])
+            while abs(lid_xyz[0] - box_xy[0]) < 0.21 and abs(lid_xyz[1] - box_xy[1]) < 0.16:
+                lid_xyz[:2] = np.random.uniform(low=self.box_range[0], high=self.box_range[1])
         self.p.resetBasePositionAndOrientation(
             self.box_base_id, np.concatenate([box_xy, [0.03]]), [0., 0., 0., 1.]
         )
         self.p.resetBasePositionAndOrientation(
-            self.box_lid_id, np.concatenate([box_xy , [0.095]]), [0., 0., 0., 1.]
+            self.box_lid_id, lid_xyz, [0., 0., 0., 1.]
         )
         self.robot.control(
             np.random.uniform(low=self.robot_eef_range[0], high=self.robot_eef_range[1]), 
@@ -397,8 +410,8 @@ class BoxLidEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnv(BasePrimitiveEnv):
-    def __init__(self, seed=None, reward_type="dense") -> None:
-        super().__init__(seed)
+    def __init__(self, seed=None, reward_type="dense", view_mode="third") -> None:
+        super().__init__(seed, view_mode)
         self.approach_dist = 0.1
         self.handle_pos_threshold = 0.01
         self.reward_type = reward_type
@@ -489,7 +502,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.p.stepSimulation()
         cur_drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
-        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (cur_drawer_joint, cur_handle_pos), 'img': goal_img}
 
         # recover state
@@ -504,15 +517,17 @@ class DrawerObjEnv(BasePrimitiveEnv):
         if self.reward_type == "sparse":
             reward = float(is_success)
         elif self.reward_type == "dense_stage":
-            reward_stages = [-1.0, -0.5, 0.0]
+            reward_stages = [-0.2, -0.1, 0.0]
             cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
             eef_dist = np.linalg.norm(self.robot.get_eef_position() - cur_handle_pos)
             if eef_dist > 0.01:
                 reward = reward_stages[0] + np.clip(1 - eef_dist, 0.0, 1.0) * (reward_stages[1] - reward_stages[0])
+                is_success = False
             elif handle_dist >= self.handle_pos_threshold:
                 reward = reward_stages[1] + (1 - handle_dist / (self.drawer_handle_range[1] - self.drawer_handle_range[0])) * (reward_stages[2] - reward_stages[1])
+                is_success = False
             else:
-                assert is_success
+                is_success = True
                 reward = 1.0
         elif self.reward_type == "dense":
             cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
@@ -577,7 +592,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
 
 if __name__ == "__main__":
-    env = DrawerObjEnv()
+    env = DrawerObjEnv(view_mode="third")
     is_success = []
     env.start_rec("test")
     for i in range(20):
