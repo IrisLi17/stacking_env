@@ -235,19 +235,15 @@ class PandaRobot(object):
         self.p.changeConstraint(c, gearRatio=-1, erp=0.1, maxForce=50)
 
     def get_obs(self):
-        # eef_state = self.p.getLinkState(self.id, self.eef_index, computeLinkVelocity=1, computeForwardKinematics=1)
-        # eef_pos, eef_orn, _, _, _, _, eef_vl, eef_va = eef_state
-        # eef_orn = quat_diff(eef_orn, np.array([1, 0, 0, 0]))
-        # eef_euler = self.p.getEulerFromQuaternion(eef_orn)
-        # eef_pos, eef_euler, eef_vl, eef_va = map(np.asarray, [eef_pos, eef_euler, eef_vl, eef_va])
-        # finger_position, finger_vel, *_ = self.p.getJointState(self.id, self.finger_drive_index)
-        # eef_vl *= 1. / 240 * self.num_substeps
-        # finger_vel *= 1. / 240 * self.num_substeps
-        joint_pos = self.get_joint_position()
-        finger_width = self.get_finger_width()
-        eef_pos = self.get_eef_position()
-        eef_euler = self.get_eef_orn(as_type="euler") - np.array([np.pi, 0., 0.])
-        return np.concatenate([joint_pos, [finger_width], eef_pos, eef_euler])
+        eef_state = self.p.getLinkState(self.id, self.eef_index, computeLinkVelocity=1, computeForwardKinematics=1)
+        eef_pos, eef_orn, _, _, _, _, eef_vl, eef_va = eef_state
+        eef_orn = quat_diff(eef_orn, np.array([1, 0, 0, 0]))
+        eef_euler = self.p.getEulerFromQuaternion(eef_orn)
+        eef_pos, eef_euler, eef_vl, eef_va = map(np.asarray, [eef_pos, eef_euler, eef_vl, eef_va])
+        finger_position, finger_vel, *_ = self.p.getJointState(self.id, self.finger_drive_index)
+        eef_vl *= 1. / 240 * self.num_substeps
+        finger_vel *= 1. / 240 * self.num_substeps
+        return np.concatenate([eef_pos, eef_euler, eef_vl, [finger_position, finger_vel]])
 
     def get_eef_position(self):
         eef_pos, *_ = self.p.getLinkState(self.id, self.eef_index)
@@ -262,10 +258,6 @@ class PandaRobot(object):
     def get_finger_width(self):
         finger_position, *_ = self.p.getJointState(self.id, self.finger_drive_index)
         return 2 * finger_position
-
-    def get_joint_position(self):
-        joint_position = [self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]]
-        return np.array(joint_position)
 
     def control(self, eef_pos, eef_orn, finger, relative=True, teleport=False):
         # self._change_dynamics()
