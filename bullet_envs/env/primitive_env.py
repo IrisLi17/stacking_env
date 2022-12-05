@@ -31,6 +31,7 @@ class BasePrimitiveEnv(gym.Env):
         self.seed(seed)
         self.view_mode = view_mode
         self._setup_env()
+        self.privilege_dim = None
         self.goal = self.sample_goal()
         obs = self._get_obs()
         self.observation_space = spaces.Dict(
@@ -159,12 +160,13 @@ class BasePrimitiveEnv(gym.Env):
         pass
 
     def _get_obs(self):
-        robot_state = self.robot.get_state()
-        joint_pos = robot_state["qpos"]
-        eef_pos = self.robot.get_eef_position()
-        eef_euler = self.robot.get_eef_orn(as_type="euler")
         scene = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
-        return {"img": scene, "robot_state": np.concatenate([joint_pos, eef_pos, eef_euler]), "goal": self.goal["img"]}
+        robot_obs = self.robot.get_obs()
+        privilege_info = self._get_privilege_info()
+        if self.privilege_dim is None:
+            self.privilege_dim = privilege_info.shape[0]
+        return {"img": scene, "robot_state": robot_obs, 
+                "goal": self.goal["img"], "privilege_info": privilege_info}
     
     def _get_graspable_objects(self):
         return ()
@@ -188,6 +190,9 @@ class BasePrimitiveEnv(gym.Env):
         rgb_array = np.array(px, dtype=np.uint8)
         rgb_array = np.reshape(rgb_array, (height, width, 4))
         return rgb_array
+    
+    def _get_privilege_info(self):
+        return None
 
 
 def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third") -> np.ndarray:
@@ -479,6 +484,11 @@ class DrawerObjEnv(BasePrimitiveEnv):
     def _get_graspable_objects(self):
         return self.graspable_objects
     
+    def _get_privilege_info(self):
+        cur_drawer = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
+        goal_drawer = self.goal["state"][0]
+        return np.array([cur_drawer, goal_drawer])
+
     def sample_goal(self):
         # store current state for recovery
         robot_state = self.robot.get_state()

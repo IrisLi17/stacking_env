@@ -147,13 +147,15 @@ class MVPVecPyTorch(VecEnvWrapper):
     def reset(self):
         obs = self.venv.reset()
         assert "img" in obs.keys() and "goal" in obs.keys()
+        assert "robot_state" in obs.keys() and "privilege_info" in obs.keys()
         normed_img, normed_goal = self._normalize_obs(obs)
         scene_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_img).float().to(self.device))
         scene_feat = self.mvp_model.forward_norm(scene_feat)
         goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
         goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
-        obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
+        privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)
+        obs = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
         if isinstance(self.observation_space, gym.spaces.Dict):
             self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(obs.shape[-1],))
         return obs
@@ -172,7 +174,8 @@ class MVPVecPyTorch(VecEnvWrapper):
             goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
             goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
-        obs = torch.cat([scene_feat, robot_state, goal_feat], dim=-1)
+        privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)
+        obs = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         return obs, reward, done, info
 
