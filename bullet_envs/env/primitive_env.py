@@ -58,9 +58,12 @@ class BasePrimitiveEnv(gym.Env):
             gripper_status = "open"
         else:
             gripper_status = "close"
-        self.robot.reset_primitive(gripper_status, self._get_graspable_objects(), partial(render, robot=self.robot, view_mode=self.view_mode))
         # sample goal
         self.goal = self.sample_goal()
+        self.robot.reset_primitive(
+            gripper_status, self._get_graspable_objects(), 
+            partial(render, robot=self.robot, view_mode=self.view_mode, width=224, height=224), 
+            self.goal["img"].transpose((1, 2, 0)))
         obs = self._get_obs()
         return obs    
     
@@ -192,7 +195,7 @@ class BasePrimitiveEnv(gym.Env):
         return rgb_array
     
     def _get_privilege_info(self):
-        return None
+        return np.empty(0)
 
 
 def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third") -> np.ndarray:
@@ -235,32 +238,14 @@ def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = N
 # def process_img(color, depth, cam_config):
 #     # goal: filter out robot and background, the perspective from robot?
 class BoxLidEnv(BasePrimitiveEnv):
-    def __init__(self, seed=None, reward_type="sparse") -> None:
-        super().__init__(seed)
+    def __init__(self, seed=None, reward_type="sparse", view_mode="third") -> None:
+        super().__init__(seed, view_mode)
         self.approach_dist = 0.1
         self.dist_threshold = 0.01
         self.rot_threshold = 0.1
         self.reward_type = reward_type
 
     def _setup_callback(self):
-        # self.drawer_id = self.p.loadURDF(
-        #     os.path.join(os.path.dirname(__file__), "assets/drawer.urdf"), 
-        #     [0.40000, 0.00000, 0.1], [0.000000, 0.000000, 0.0, 1.0],
-        #     globalScaling=0.125
-        # )
-        # self.drawer_range = np.array([
-        #     [self.robot_eef_range[0][0] + 0.05, self.robot_eef_range[0][1] + 0.05, 0.05],
-        #     [self.robot_eef_range[1][0], self.robot_eef_range[1][1] - 0.05, 0.05]
-        # ])
-        # for j in range(self.p.getNumJoints(self.drawer_id)):
-        #     joint_info = self.p.getJointInfo(self.drawer_id, j)
-        #     if joint_info[2] != self.p.JOINT_FIXED:
-        #         self.drawer_joint = joint_info[0]
-        #         self.drawer_handle_range = (joint_info[8], joint_info[9])
-        #     if joint_info[12] == b'handle_r':
-        #         self.drawer_handle_link = joint_info[0]
-        #         # self.joint_damping.append(joint_info[6])
-        #         break
         self.box_base_id = self.p.loadURDF(
             os.path.join(os.path.dirname(__file__), "assets/box_no_lid.urdf"),
             [0.5, -0.3, 0.08], [0., 0., 0., 1.], useFixedBase=True,
@@ -288,7 +273,7 @@ class BoxLidEnv(BasePrimitiveEnv):
         )
         # reset lid
         if np.random.uniform(0, 1) < 0.5:
-            lid_xyz = np.concatenate([box_xy, [0.095]])
+            lid_xyz = np.concatenate([box_xy, [0.07]])
         else:
             lid_xyz = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.02]])
             while abs(lid_xyz[0] - box_xy[0]) < 0.21 and abs(lid_xyz[1] - box_xy[1]) < 0.16:
@@ -325,17 +310,26 @@ class BoxLidEnv(BasePrimitiveEnv):
         
         # pair of underlying state and goal image
         box_base_pose = self.p.getBasePositionAndOrientation(self.box_base_id)
-        goal_lid_pos = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.025]])
-        while abs(goal_lid_pos[0] - box_base_pose[0][0]) < 0.21 and abs(goal_lid_pos[1] - box_base_pose[0][1]) < 0.16:
-            goal_lid_pos = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.025]])
+        if np.linalg.norm(np.array(box_lid_pose[0]) - np.array(box_base_pose[0])) > 0.1 and np.random.uniform(0, 1) < 0.5:
+            goal_lid_pos = np.concatenate([box_base_pose[0][:2], [0.07]])
+        else:
+            goal_lid_pos = np.concatenate(
+                [np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.02]]
+            )
+            while abs(goal_lid_pos[0] - box_base_pose[0][0]) < 0.21 and abs(goal_lid_pos[1] - box_base_pose[0][1]) < 0.16:
+                goal_lid_pos = np.concatenate([np.random.uniform(low=self.box_range[0], high=self.box_range[1]), [0.025]])
         goal_lid_quat = box_lid_pose[1]
 
         # set into the environment to get image
         self.p.resetBasePositionAndOrientation(self.box_lid_id, goal_lid_pos, goal_lid_quat)
         # Need to simulate until valid, or make sure the sampled goal is stable
         self.p.stepSimulation()
-        goal_img = render(self.p, width=224, height=224).transpose((2, 0, 1))[:3]
-        goal_dict = {'state': (goal_lid_pos, goal_lid_quat), 'img': goal_img}
+        _robot_xyz = np.array([np.random.uniform(0.35, 0.45), np.random.uniform(-0.1, 0.1), np.random.uniform(0.25, 0.3)])
+        self.robot.control(_robot_xyz, np.array([1, 0, 0, 0]), 0.04, relative=False, teleport=True)
+        goal_img = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        goal_robot_config = self.robot.get_obs()
+        goal_lid_pos, goal_lid_quat = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
+        goal_dict = {'state': (np.array(goal_lid_pos), np.array(goal_lid_quat)), 'img': goal_img, 'robot_config': goal_robot_config}
 
         # recover state
         self.p.resetBasePositionAndOrientation(self.box_lid_id, box_lid_pose[0], box_lid_pose[1])
@@ -377,19 +371,23 @@ class BoxLidEnv(BasePrimitiveEnv):
             action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.1])), [0.]])
             self.step(action)
             # put down
-            base_pos = self.p.getBasePositionAndOrientation(self.box_base_id)[0]
-            if base_pos[1] > 0:
-                new_pos = base_pos + np.array([0., -0.25, 0.02])
-            else:
-                new_pos = base_pos + np.array([0., 0.25, 0.02])
+            new_pos = self.goal["state"][0] + np.array([0, 0, 0.01])
+            # base_pos = self.p.getBasePositionAndOrientation(self.box_base_id)[0]
+            # if base_pos[1] > 0:
+            #     new_pos = base_pos + np.array([0., -0.25, 0.02])
+            # else:
+            #     new_pos = base_pos + np.array([0., 0.25, 0.02])
             action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(new_pos), [0.]])
             self.step(action)
             # release
             action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], [0., 0., 0., 0.]])
             self.step(action)
+            print("lid pose", self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2])
+            print("goal", self.goal["state"])
             # go up
             action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([-0.1, -0.2, 0.2])), [0.]])
-            self.step(action)
+            _, reward, done, info = self.step(action)
+            print("reward", reward)
         elif task == "close_box":
             lid_pose = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
             lid_yaw = self.p.getEulerFromQuaternion(lid_pose[1])[2]
@@ -411,7 +409,7 @@ class BoxLidEnv(BasePrimitiveEnv):
             # move away
             action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self._eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.1])), [0.]])
             self.step(action)
-        return 
+        return info
 
 
 class DrawerObjEnv(BasePrimitiveEnv):
@@ -602,10 +600,11 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
 
 if __name__ == "__main__":
-    env = DrawerObjEnv(view_mode="third")
+    # env = DrawerObjEnv(view_mode="third")
+    env = BoxLidEnv()
     is_success = []
     env.start_rec("test")
-    for i in range(20):
+    for i in range(2):
         obs = env.reset()
         cur_img = obs["img"]
         goal_img = obs["goal"]

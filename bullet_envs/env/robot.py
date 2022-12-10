@@ -224,6 +224,7 @@ class PandaRobot(object):
         self.max_atomic_step = 20
         self.graspable_objects = ()
         self.save_video = False
+        self.goal_img = None
         c = self.p.createConstraint(self.id,
                                     9,
                                     self.id,
@@ -325,8 +326,9 @@ class PandaRobot(object):
                     #             if contact_body_and_link2[idx] == g:
                     #                 print(i, "contact2", contact_points_info(contact2[idx]))
             if self.save_video:
-                color = self.render_fn(self.p)
-                self.video_writer.append_data(color)
+                color = self.render_fn(self.p)[..., :3]
+                color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                self.video_writer.append_data(color_with_goal)
             # print(self.p.getLinkState(self.id, 11)[0])
             # joint_states = self.p.getJointStates(self.id, self.motor_indices)
             # positions, *_ = zip(*joint_states)
@@ -365,11 +367,12 @@ class PandaRobot(object):
             self.p.resetJointState(self.id, j, state_dict["qpos"][j], state_dict["qvel"][j])
     
     #### Primitives below #####
-    def reset_primitive(self, gripper_status: str, graspable_objects: tuple, render_fn=None):
+    def reset_primitive(self, gripper_status: str, graspable_objects: tuple, render_fn=None, goal_img=None):
         self.contact_constraint = None
         self.gripper_status = gripper_status
         self.graspable_objects = graspable_objects
         self.render_fn = render_fn
+        self.goal_img = goal_img
     
     def move_direct_ee_pose(self, eef_pos, eef_orn, pos_threshold=None, rot_threshold=None):
         if pos_threshold is None:
@@ -469,8 +472,9 @@ class PandaRobot(object):
             while True:
                 self.p.stepSimulation()
                 if self.save_video and step_count % self.num_substeps == 0:
-                    color = self.render_fn(self.p)
-                    self.video_writer.append_data(color)
+                    color = self.render_fn(self.p)[..., :3]
+                    color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                    self.video_writer.append_data(color_with_goal)
                 step_count += 1
                 if self.get_finger_width() - width > -2e-3 or step_count >= self.max_atomic_step:
                     break
@@ -491,8 +495,9 @@ class PandaRobot(object):
         while True:
             self.p.stepSimulation()
             if self.save_video and atomic_step % self.num_substeps == 0:
-                color = self.render_fn(self.p)
-                self.video_writer.append_data(color)
+                color = self.render_fn(self.p)[..., :3]
+                color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                self.video_writer.append_data(color_with_goal)
             atomic_step += 1
             contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
             contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
