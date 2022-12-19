@@ -201,15 +201,15 @@ class BasePrimitiveEnv(gym.Env):
 def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third") -> np.ndarray:
     if view_mode == "third":
         view_matrix = client.computeViewMatrixFromYawPitchRoll(
-            cameraTargetPosition=(0.45, 0, 0.0),
-            distance=0.4,
-            yaw=90,
+            cameraTargetPosition=(0.45, 0, 0.1),
+            distance=0.5,
+            yaw=-90,
             pitch=-60,
             roll=0,
             upAxisIndex=2,
         )
         proj_matrix = client.computeProjectionMatrixFOV(
-            fov=90, aspect=1.0, nearVal=0.1, farVal=100.0
+            fov=60, aspect=1.0, nearVal=0.1, farVal=100.0
         )
     elif view_mode == "ego":
         eef_pos = robot.get_eef_position().reshape((3, 1))
@@ -812,7 +812,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         if is_drawer_open and is_object_inside:
             # can move the drawer, or take the object outside the drawer
             # object and drawer may move simultaneously
-            if np.random.uniform(0, 1) > 1:
+            if np.random.uniform(0, 1) > 0.5:
                 drawer_goal = np.random.uniform(*self.drawer_handle_range)
                 self.perturb_drawer(drawer_goal)
             else:
@@ -821,7 +821,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
             
         elif is_drawer_open and not is_object_inside:
             # can move the drawer, or put the object into the drawer, or move the object on the table
-            if np.random.uniform(0, 1) > 1:
+            if np.random.uniform(0, 1) > 0.5:
                 drawer_goal = np.random.uniform(*self.drawer_handle_range)
                 self.perturb_drawer(drawer_goal)
             else:
@@ -839,7 +839,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
             self.perturb_drawer(drawer_goal)
         elif (not is_drawer_open) and (not is_object_inside):
             # move the drawer, move object on the table
-            if np.random.uniform(0, 1) > 1:
+            if np.random.uniform(0, 1) > 0.5:
                 drawer_goal = np.random.uniform(*self.drawer_handle_range)
                 self.perturb_drawer(drawer_goal)
             else:
@@ -855,7 +855,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
 
 if __name__ == "__main__":
-    env = DrawerObjEnv(view_mode="third")
+    env = DrawerObjEnv(view_mode="ego")
     # env = BoxLidEnv()
     is_success = []
     env.start_rec("test")
