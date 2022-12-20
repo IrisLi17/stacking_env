@@ -146,7 +146,7 @@ class BasePrimitiveEnv(gym.Env):
         self.p.setTimeStep(self.dt)
         self.p.setGravity(0., 0., -9.8)
         self.p.resetDebugVisualizerCamera(1.0, 40, -20, [0, 0, 0,] )
-        # plane_id = self.p.loadURDF(os.path.join(DATAROOT, "plane.urdf"), [0, 0, -0.795])
+        plane_id = self.p.loadURDF(os.path.join(DATAROOT, "plane.urdf"), [0, 0, -0.795])
         table_id = self.p.loadURDF(
             os.path.join(DATAROOT, "table/table.urdf"), 
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
