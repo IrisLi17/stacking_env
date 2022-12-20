@@ -132,16 +132,20 @@ class MVPVecPyTorch(VecEnvWrapper):
         super().__init__(venv, observation_space, action_space)
         self.device = device
         import mvp
+        import torchvision.transforms
         self.mvp_model = mvp.load("vitb-mae-egosoup")
         self.mvp_model.to(self.device)
         self.mvp_model.freeze()
-        self.im_mean = np.array([0.485, 0.456, 0.406]).reshape((3, 1, 1))
-        self.im_std = np.array([0.229, 0.224, 0.225]).reshape((3, 1, 1))
+        self.image_transform = torchvision.transforms.Resize(224)
+        self.im_mean = torch.Tensor([0.485, 0.456, 0.406]).reshape((1, 3, 1, 1)).to(self.device)
+        self.im_std = torch.Tensor([0.229, 0.224, 0.225]).reshape((1, 3, 1, 1)).to(self.device)
         self.reset()
     
     def _normalize_obs(self, obs):
-        normed_img = (obs["img"] / 255.0 - np.expand_dims(self.im_mean, axis=0)) / np.expand_dims(self.im_std, axis=0)
-        normed_goal = (obs["goal"] / 255.0 - np.expand_dims(self.im_mean, axis=0)) / np.expand_dims(self.im_std, axis=0)
+        img = self.image_transform(torch.from_numpy(obs["img"]).float().to(self.device))
+        goal = self.image_transform(torch.from_numpy(obs["goal"]).float().to(self.device))
+        normed_img = (img / 255.0 - self.im_mean) / self.im_std
+        normed_goal = (goal / 255.0 - self.im_mean) / self.im_std
         return normed_img, normed_goal
 
     def reset(self):
@@ -149,9 +153,9 @@ class MVPVecPyTorch(VecEnvWrapper):
         assert "img" in obs.keys() and "goal" in obs.keys()
         assert "robot_state" in obs.keys() and "privilege_info" in obs.keys()
         normed_img, normed_goal = self._normalize_obs(obs)
-        scene_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_img).float().to(self.device))
+        scene_feat = self.mvp_model.extract_feat(normed_img.float())
         scene_feat = self.mvp_model.forward_norm(scene_feat)
-        goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
+        goal_feat = self.mvp_model.extract_feat(normed_goal.float())
         goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
         privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)
@@ -169,9 +173,9 @@ class MVPVecPyTorch(VecEnvWrapper):
         assert "img" in obs.keys() and "goal" in obs.keys()
         normed_img, normed_goal = self._normalize_obs(obs)
         with torch.no_grad():
-            scene_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_img).float().to(self.device))
+            scene_feat = self.mvp_model.extract_feat(normed_img.float())
             scene_feat = self.mvp_model.forward_norm(scene_feat)
-            goal_feat = self.mvp_model.extract_feat(torch.from_numpy(normed_goal).float().to(self.device))
+            goal_feat = self.mvp_model.extract_feat(normed_goal.float())
             goal_feat = self.mvp_model.forward_norm(goal_feat)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
         privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)

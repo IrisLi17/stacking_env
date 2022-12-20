@@ -66,7 +66,7 @@ class BasePrimitiveEnv(gym.Env):
         self.goal = self.sample_goal()
         self.robot.reset_primitive(
             gripper_status, self._get_graspable_objects(), 
-            partial(render, robot=self.robot, view_mode=self.view_mode, width=224, height=224), 
+            partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128), 
             self.goal["img"].transpose((1, 2, 0)))
         obs = self._get_obs()
         return obs    
@@ -167,7 +167,7 @@ class BasePrimitiveEnv(gym.Env):
         pass
 
     def _get_obs(self):
-        scene = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        scene = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
         robot_obs = self.robot.get_obs()
         privilege_info = self._get_privilege_info()
         if self.privilege_dim is None:
@@ -330,7 +330,7 @@ class BoxLidEnv(BasePrimitiveEnv):
         self.p.stepSimulation()
         _robot_xyz = np.array([np.random.uniform(0.35, 0.45), np.random.uniform(-0.1, 0.1), np.random.uniform(0.25, 0.3)])
         self.robot.control(_robot_xyz, np.array([1, 0, 0, 0]), 0.04, relative=False, teleport=True)
-        goal_img = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
         goal_robot_config = self.robot.get_obs()
         goal_lid_pos, goal_lid_quat = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
         goal_dict = {'state': (np.array(goal_lid_pos), np.array(goal_lid_quat)), 'img': goal_img, 'robot_config': goal_robot_config}
@@ -585,7 +585,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         cur_object_pose = self.p.getBasePositionAndOrientation(self.object_id)
-        goal_img = render(self.p, width=224, height=224, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
         goal_dict = {'state': (cur_drawer_joint, cur_handle_pos, cur_object_pose), 'img': goal_img}
 
         # recover state
