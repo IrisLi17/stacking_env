@@ -221,7 +221,7 @@ class PandaRobot(object):
         self.rot_threshold = 0.1
         self.max_delta_xyz = 0.05
         self.max_delta_rot = 0.3
-        self.max_atomic_step = 20
+        self.max_atomic_step = 15
         self.graspable_objects = ()
         self.save_video = False
         self.goal_img = None
