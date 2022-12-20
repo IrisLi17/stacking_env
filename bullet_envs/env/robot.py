@@ -400,8 +400,8 @@ class PandaRobot(object):
             desired_finger = self.get_finger_width() / 2 - 0.005
         done = False
         atomic_step = 0
-        previous_eef_pos = self.get_eef_position()
-        previous_eef_orn = self.get_eef_orn()
+        # previous_eef_pos = self.get_eef_position()
+        # previous_eef_orn = self.get_eef_orn()
         while not done:
             # greedily move towards the desired pose
             cur_eef_pos = self.get_eef_position()
@@ -430,19 +430,19 @@ class PandaRobot(object):
                     import IPython
                     IPython.embed()
             self.control(target_eef_pos, target_eef_quat, desired_finger, relative=False, teleport=False)
-            # Early terminate if the robot cannot effectively move towards goal?
-            new_eef_pos = self.get_eef_position()
-            new_eef_orn = self.get_eef_orn()
-            diff_quat = quat_diff(new_eef_orn, previous_eef_orn)
-            if np.linalg.norm(previous_eef_pos - new_eef_pos) < self.pos_threshold / 2 and \
-                abs(np.arccos(np.clip(diff_quat[3], -1.0, 1.0))) * 2 < self.rot_threshold / 2:
-                break
-            previous_eef_pos = new_eef_pos
-            previous_eef_orn = new_eef_orn
             atomic_step += 1
+            # Early terminate if the robot cannot effectively move towards goal?
+            # new_eef_pos = self.get_eef_position()
+            # new_eef_orn = self.get_eef_orn()
+            # diff_quat = quat_diff(new_eef_orn, previous_eef_orn)
+            # if np.linalg.norm(previous_eef_pos - new_eef_pos) < self.pos_threshold / 2 and \
+            #     abs(np.arccos(np.clip(diff_quat[3], -1.0, 1.0))) * 2 < self.rot_threshold / 2:
+            #     break
+            # previous_eef_pos = new_eef_pos
+            # previous_eef_orn = new_eef_orn
             if atomic_step >= self.max_atomic_step:
                 break
-        # print("atomic step", atomic_step)
+        # print("move direct atomic step", atomic_step)
 
     def move_approach_ee_pose(self, eef_pos, eef_orn, approach_dist=0.05, pos_threshold=None, rot_threshold=None):
         # print("desired eef pose", eef_pos, eef_orn)
