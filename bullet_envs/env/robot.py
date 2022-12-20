@@ -334,6 +334,16 @@ class PandaRobot(object):
             # positions, *_ = zip(*joint_states)
             # print(positions)
         # self._change_dynamics()
+    
+    def teleport_joint(self, joint_positions=None, finger=None):
+        if joint_positions is None:
+            joint_positions = np.array([0., -0.27, 0.0, -2.5585, 0., 2.2807, 0.7893])
+        if finger is None:
+            finger = 0.04
+        for idx, j in enumerate(self.motor_indices[:7]):
+            self.p.resetJointState(self.id, j, joint_positions[idx])
+        for j in self.motor_indices[7:]:
+            self.p.resetJointState(self.id, j, finger)
 
     def _change_dynamics(self):
         return
@@ -366,9 +376,14 @@ class PandaRobot(object):
         for j in range(self.p.getNumJoints(self.id)):
             self.p.resetJointState(self.id, j, state_dict["qpos"][j], state_dict["qvel"][j])
     
+    def remove_constraint(self):
+        if self.contact_constraint is not None:
+            self.p.removeConstraint(self.contact_constraint)
+            self.contact_constraint = None
+    
     #### Primitives below #####
     def reset_primitive(self, gripper_status: str, graspable_objects: tuple, render_fn=None, goal_img=None):
-        self.contact_constraint = None
+        self.remove_constraint()
         self.gripper_status = gripper_status
         self.graspable_objects = graspable_objects
         self.render_fn = render_fn

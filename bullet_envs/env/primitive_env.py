@@ -478,6 +478,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
             self.p.resetBasePositionAndOrientation(
                 self.object_id, object_pos, object_quat
             )
+        self.robot.remove_constraint()
         _randomize_drawer()
         _count = 0
         # check handle position
@@ -571,12 +572,12 @@ class DrawerObjEnv(BasePrimitiveEnv):
             goal_object_pos = self._sample_object_inside_drawer()
 
         # set into the environment to get image
-        self.robot.control(np.array([0.4, 0.0, 0.25]), np.array([1., 0., 0., 0.]), 0.04, relative=False, teleport=True)
         self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
         self.p.resetBasePositionAndOrientation(self.object_id, goal_object_pos, object_state[1])
         # Need to simulate until valid, or make sure the sampled goal is stable
         for _ in range(5):
             self.p.stepSimulation()
+        self.robot.teleport_joint()
         cur_drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         cur_object_pose = self.p.getBasePositionAndOrientation(self.object_id)
@@ -630,7 +631,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
     def eef_pos_to_action(self, eef_pos):
         return (eef_pos - np.mean(self.robot_eef_range, axis=0)) / ((self.robot_eef_range[1] - self.robot_eef_range[0]) / 2)
     
-    def oracle_agent(self, mode="open_drawer"):
+    def oracle_agent(self, record_traj=False):
         '''
         if mode == "open_drawer":
             # lift up
@@ -685,11 +686,11 @@ class DrawerObjEnv(BasePrimitiveEnv):
         '''
         if self.is_goal_move_object_in or self.is_goal_move_object_out:
             # should move object
-            info = self.take_out_object(self.goal["state"][2][0])
+            info, traj = self.take_out_object(self.goal["state"][2][0], record_traj)
         else:
             # should move drawer
-            info = self.perturb_drawer(self.goal["state"][0])
-        return info
+            info, traj = self.perturb_drawer(self.goal["state"][0], record_traj)
+        return info, traj
 
     def _is_drawer_open(self):
         is_drawer_open = self.p.getJointState(self.drawer_id, self.drawer_joint)[0] < (self.drawer_handle_range[0] + self.drawer_handle_range[1]) / 2
@@ -741,19 +742,38 @@ class DrawerObjEnv(BasePrimitiveEnv):
         )
         return object_position
 
-    def perturb_drawer(self, drawer_goal):
+    @staticmethod
+    def _store_transition(traj, obs, action, reward, done):
+        traj["obs"].append(obs)
+        traj["action"].append(action)
+        traj["reward"].append(reward)
+        traj["done"].append(done)
+
+    def perturb_drawer(self, drawer_goal, record_traj=False):
+        traj = {"obs": [], "action": [], "reward": [], "done": []}
+        # store the first obs
+        obs = self._get_obs()
+        traj["obs"].append(obs)
         handle_position = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.2])), [0.]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(handle_position + np.array([0., 0., 0.1])), [0.2]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         _count = 0
         while _count < 5 and np.linalg.norm(self.robot.get_eef_position() - self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]) > 2e-3:
             action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0] - np.array([0., 0., -0.005])), [0.2]])
-            self.step(action)
+            obs, reward, done, info = self.step(action)
+            if record_traj:
+                self._store_transition(traj, obs, action, reward, done)
             _count += 1
         action = np.concatenate([[PrimitiveType.GRIPPER_GRASP], np.zeros(4)])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         _count = 0
         while _count < 5 and abs(self.p.getJointState(self.drawer_id, self.drawer_joint)[0] - drawer_goal) > 5e-3:
             drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
@@ -761,17 +781,30 @@ class DrawerObjEnv(BasePrimitiveEnv):
                 [PrimitiveType.MOVE_DIRECT], 
                 self.eef_pos_to_action(self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0] + np.array([0., drawer_goal - drawer_joint, 0.0])), 
                 [0.2]])
-            self.step(action)
+            obs, reward, done, info = self.step(action)
+            if record_traj:
+                self._store_transition(traj, obs, action, reward, done)
             _count += 1
         action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], np.zeros(4)])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.2])), [0.]])
-        _, reward, done, info = self.step(action)
-        return info
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
+            if not info["is_success"]:
+                traj = {"obs": [], "action": [], "reward": [], "done": []}
+        return info, traj
     
-    def take_out_object(self, object_goal):
+    def take_out_object(self, object_goal, record_traj=False):
+        traj = {"obs": [], "action": [], "reward": [], "done": []}
+        obs = self._get_obs()
+        traj["obs"].append(obs)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.2])), [0.]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         object_position, object_quat = self.p.getBasePositionAndOrientation(self.object_id)[:2]
         # orientation?
         zrot = self.p.getEulerFromQuaternion(object_quat)[2]
@@ -783,25 +816,43 @@ class DrawerObjEnv(BasePrimitiveEnv):
                 zrot += np.pi
         zrot_action = zrot / (np.pi / 2)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(object_position + np.array([0., 0., 0.1])), [zrot_action]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         object_position = self.p.getBasePositionAndOrientation(self.object_id)[0]
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(object_position), [zrot_action]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.GRIPPER_GRASP], np.zeros(4)])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         object_position = self.p.getBasePositionAndOrientation(self.object_id)[0]
         place_eef = self.eef_pos_to_action(self.robot.get_eef_position() + object_goal - object_position)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.25])), [zrot_action]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], place_eef[:2], [self.robot.get_eef_position()[2]], [zrot_action]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], place_eef, [zrot_action]])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.GRIPPER_OPEN], np.zeros(4)])
-        self.step(action)
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
         action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(self.robot.get_eef_position() + np.array([0., 0., 0.2])), [zrot_action]])
-        _, reward, done, info = self.step(action)
-        return info
+        obs, reward, done, info = self.step(action)
+        if record_traj:
+            self._store_transition(traj, obs, action, reward, done)
+            if not info["is_success"]:
+                traj = {"obs": [], "action": [], "reward": [], "done": []}
+        return info, traj
 
     def play_agent(self):
         # see current status
@@ -870,7 +921,7 @@ if __name__ == "__main__":
         print("reset obs", obs["privilege_info"])
         print("goal state", goal_state[0], goal_state[2][0])
         # env.start_rec("test")
-        info = env.oracle_agent()
+        info, traj = env.oracle_agent()
         is_success.append(info["is_success"])
         # env.oracle_agent("open_box")
         # env.oracle_agent("close_box")
