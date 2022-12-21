@@ -891,13 +891,14 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
     def load_template(self, object_name, scaling=1.0):
         # urdf_path = os.path.join(os.path.dirname(__file__), "assets/ycb_objects", object_name, "model.urdf")
+        urdf_path = os.path.join(os.path.dirname(__file__), "assets/ball_simple.urdf")
         self.object_range = np.array([
             [0.45 - 0.15, 0.1 - 0.4, self.drawer_range[0][2]], 
             [0.45 + 0.15, 0.1 + 0.2, self.drawer_range[0][2]]])
-        vis_id = self.p.createVisualShape(self.p.GEOM_SPHERE, 0.025, rgbaColor=[0, 1, 0, 1])
-        col_id = self.p.createCollisionShape(self.p.GEOM_SPHERE, 0.025)
-        self.object_id = self.p.createMultiBody(0.1, col_id, vis_id, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.])
-        # self.object_id = self.p.loadURDF(urdf_path, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.], globalScaling=scaling)
+        # vis_id = self.p.createVisualShape(self.p.GEOM_SPHERE, 0.025, rgbaColor=[0, 1, 0, 1])
+        # col_id = self.p.createCollisionShape(self.p.GEOM_SPHERE, 0.025)
+        # self.object_id = self.p.createMultiBody(0.1, col_id, vis_id, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.])
+        self.object_id = self.p.loadURDF(urdf_path, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.], globalScaling=scaling)
 
 
 if __name__ == "__main__":
