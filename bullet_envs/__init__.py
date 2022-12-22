@@ -19,5 +19,5 @@ gym.register(
 )
 
 gym.register(
-    "BulletDrawer-v1", entry_point=DrawerObjEnv, max_episode_steps=50
+    "BulletDrawer-v1", entry_point=DrawerObjEnv, max_episode_steps=20
 )

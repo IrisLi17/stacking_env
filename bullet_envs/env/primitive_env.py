@@ -555,6 +555,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
         # pair of underlying state and goal image
         if self.is_goal_move_drawer:
             goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
+            while abs(goal_drawer_joint - drawer_joint_state[0]) < 0.01:
+                goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
             self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
             _handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
             _count = 0
@@ -650,6 +652,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         else:
             # should move drawer
             action = self.perturb_drawer(self.goal["state"][0], record_traj)
+        action[1:] = np.clip(action[1:], -1., 1.)
         self.oracle_step_count += 1
         return action
     
@@ -722,14 +725,14 @@ class DrawerObjEnv(BasePrimitiveEnv):
         #     self._store_transition(traj, obs, action, reward, done)
         elif self.oracle_step_count == 1:
             handle_position = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
-            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(handle_position + np.array([0., 0., 0.1])), [0.2]])
+            action = np.concatenate([[PrimitiveType.MOVE_DIRECT], self.eef_pos_to_action(handle_position + np.array([0., 0., 0.1])), [0.0]])
         # obs, reward, done, info = self.step(action)
         # if record_traj:
         #     self._store_transition(traj, obs, action, reward, done)
         # _count = 0
         # while _count < 5 and np.linalg.norm(self.robot.get_eef_position() - self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0] + np.array([0., 0., 0.005])) > 5e-3:
         elif self.oracle_step_count == 2:
-            action = np.concatenate([[PrimitiveType.MOVE_GRASP], self.eef_pos_to_action(self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0] - np.array([0., 0., 0.005])), [0.2]])
+            action = np.concatenate([[PrimitiveType.MOVE_GRASP], self.eef_pos_to_action(self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0] - np.array([0., 0., 0.005])), [0.0]])
         # obs, reward, done, info = self.step(action)
         # if record_traj:
         #     self._store_transition(traj, obs, action, reward, done)
