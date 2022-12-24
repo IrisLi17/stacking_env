@@ -28,10 +28,11 @@ class PrimitiveType:
 
 
 class BasePrimitiveEnv(gym.Env):
-    def __init__(self, seed=None, view_mode="third") -> None:
+    def __init__(self, seed=None, view_mode="third", use_gpu_render=True) -> None:
         super().__init__()
         self.seed(seed)
         self.view_mode = view_mode
+        self.use_gpu_render = use_gpu_render
         self._setup_env()
         self.privilege_dim = None
         self.goal = self.sample_goal()
@@ -140,13 +141,11 @@ class BasePrimitiveEnv(gym.Env):
 
     def _setup_env(self, init_qpos=None, base_position=(0, 0, 0)):
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
-        try:
+        if self.use_gpu_render:
             plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
             print("plugin=", plugin)
             self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
             self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
-        except:
-            pass
         
         self.p.resetSimulation()
         self.p.setTimeStep(self.dt)
@@ -427,8 +426,8 @@ class BoxLidEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnv(BasePrimitiveEnv):
-    def __init__(self, seed=None, reward_type="dense", view_mode="third") -> None:
-        super().__init__(seed, view_mode)
+    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True) -> None:
+        super().__init__(seed, view_mode, use_gpu_render)
         self.approach_dist = 0.1
         self.handle_pos_threshold = 0.01
         self.object_pos_threshold = 0.02
