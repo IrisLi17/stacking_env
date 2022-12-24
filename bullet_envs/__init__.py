@@ -1,6 +1,6 @@
 import gym
 from bullet_envs.env.robot_arm_env import ArmStack, ArmPickAndPlace
-from bullet_envs.env.primitive_env import DrawerObjEnv
+from bullet_envs.env.primitive_env import DrawerObjEnv, DrawerObjEnvState
 
 
 gym.register(
@@ -20,4 +20,8 @@ gym.register(
 
 gym.register(
     "BulletDrawer-v1", entry_point=DrawerObjEnv, max_episode_steps=50
+)
+
+gym.register(
+    "BulletDrawerState-v1", entry_point=DrawerObjEnvState, max_episode_steps=50
 )

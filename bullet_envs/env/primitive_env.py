@@ -36,9 +36,12 @@ class BasePrimitiveEnv(gym.Env):
         self.privilege_dim = None
         self.goal = self.sample_goal()
         obs = self._get_obs()
-        self.observation_space = spaces.Dict(
-            OrderedDict([(key, spaces.Box(low=-np.inf, high=np.inf, shape=obs[key].shape)) for key in obs])
-        )
+        if isinstance(obs, dict):
+            self.observation_space = spaces.Dict(
+                OrderedDict([(key, spaces.Box(low=-np.inf, high=np.inf, shape=obs[key].shape)) for key in obs])
+            )
+        else:
+            self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=obs.shape)
         self.action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(5,))
         self.record_cfg = dict(
             save_video_path=os.path.join(os.path.dirname(__file__), "..", "tmp"),
@@ -137,10 +140,13 @@ class BasePrimitiveEnv(gym.Env):
 
     def _setup_env(self, init_qpos=None, base_position=(0, 0, 0)):
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
-        plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
-        print("plugin=", plugin)
-        self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
-        self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
+        try:
+            plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
+            print("plugin=", plugin)
+            self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
+            self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
+        except:
+            pass
         
         self.p.resetSimulation()
         self.p.setTimeStep(self.dt)
@@ -899,6 +905,13 @@ class DrawerObjEnv(BasePrimitiveEnv):
         # col_id = self.p.createCollisionShape(self.p.GEOM_SPHERE, 0.025)
         # self.object_id = self.p.createMultiBody(0.1, col_id, vis_id, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.])
         self.object_id = self.p.loadURDF(urdf_path, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.], globalScaling=scaling)
+
+
+class DrawerObjEnvState(DrawerObjEnv):
+    def _get_obs(self):
+        robot_obs = self.robot.get_obs()
+        privilege_info = self._get_privilege_info()
+        return np.concatenate([robot_obs, privilege_info])
 
 
 if __name__ == "__main__":
