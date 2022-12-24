@@ -71,7 +71,7 @@ class BasePrimitiveEnv(gym.Env):
         self.robot.reset_primitive(
             gripper_status, self._get_graspable_objects(), 
             partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128), 
-            self.goal["img"].transpose((1, 2, 0)))
+            self.goal["img"].transpose((1, 2, 0)) if self.goal["img"] is not None else None)
         obs = self._get_obs()
         return obs    
     
@@ -590,7 +590,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_drawer_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         cur_object_pose = self.p.getBasePositionAndOrientation(self.object_id)
-        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        goal_img = self._get_goal_image()
         goal_dict = {'state': (cur_drawer_joint, cur_handle_pos, cur_object_pose), 'img': goal_img}
 
         # recover state
@@ -598,6 +598,10 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.p.resetBasePositionAndOrientation(self.object_id, object_state[0], object_state[1])
         self.robot.set_state(robot_state)
         return goal_dict
+    
+    def _get_goal_image(self):
+        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        return goal_img
     
     def compute_reward_and_info(self):
         cur_handle_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
@@ -912,6 +916,8 @@ class DrawerObjEnvState(DrawerObjEnv):
         privilege_info = self._get_privilege_info()
         return np.concatenate([robot_obs, privilege_info])
 
+    def _get_goal_image(self):
+        return None
 
 if __name__ == "__main__":
     env = DrawerObjEnv(view_mode="third")
