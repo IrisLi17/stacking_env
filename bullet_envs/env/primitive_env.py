@@ -911,13 +911,20 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnvState(DrawerObjEnv):
+    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, render_goal=False) -> None:
+        self.render_goal = render_goal
+        super().__init__(seed, reward_type, view_mode, use_gpu_render)
+
     def _get_obs(self):
         robot_obs = self.robot.get_obs()
         privilege_info = self._get_privilege_info()
         return np.concatenate([robot_obs, privilege_info])
 
     def _get_goal_image(self):
-        return None
+        if self.render_goal:
+            return super()._get_goal_image()
+        else:
+            return None
 
 if __name__ == "__main__":
     env = DrawerObjEnv(view_mode="third")
