@@ -426,10 +426,11 @@ class BoxLidEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnv(BasePrimitiveEnv):
-    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True) -> None:
+    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, obj_task_ratio=0.5) -> None:
+        self.obj_task_ratio = obj_task_ratio
+        self.handle_pos_threshold = 0.02
         super().__init__(seed, view_mode, use_gpu_render)
         self.approach_dist = 0.1
-        self.handle_pos_threshold = 0.01
         self.object_pos_threshold = 0.02
         self.reward_type = reward_type
     
@@ -475,11 +476,18 @@ class DrawerObjEnv(BasePrimitiveEnv):
             # reset drawer joint
             self.p.resetJointState(self.drawer_id, self.drawer_joint, np.random.uniform(*self.drawer_handle_range))
         def _randomize_object():
-            if np.random.uniform(0, 1) > 0.5:
-                if self._is_drawer_open():
+            # if np.random.uniform(0, 1) > 0.5:
+            #     if self._is_drawer_open():
+            #         object_pos = self._sample_object_inside_drawer()
+            #     else:
+            #         object_pos = self._sample_object_inside_drawer(initialize=True)
+            # else:
+            #     object_pos = self._sample_object_outside_drawer()
+            if self._is_drawer_open():
+                if np.random.uniform(0, 1) > 0.5:
                     object_pos = self._sample_object_inside_drawer()
                 else:
-                    object_pos = self._sample_object_inside_drawer(initialize=True)
+                    object_pos = self._sample_object_outside_drawer()
             else:
                 object_pos = self._sample_object_outside_drawer()
             rand_angle = np.random.uniform(-np.pi / 6, np.pi / 6)
@@ -538,21 +546,22 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.is_goal_move_object_out = False
         self.is_goal_move_object_in = False
         if is_object_inside_drawer and is_drawer_open:
-            if np.random.uniform(0, 1) > 0.5:
+            if np.random.uniform(0, 1) > self.obj_task_ratio:
                 self.is_goal_move_drawer = True
             else:
                 self.is_goal_move_object_out = True
         elif is_object_inside_drawer and not is_drawer_open:
+            raise RuntimeError
             self.is_goal_move_drawer = True
         elif (not is_object_inside_drawer) and is_drawer_open:
-            if np.random.uniform(0, 1) > 2 / 3:
+            if np.random.uniform(0, 1) > self.obj_task_ratio:
                 self.is_goal_move_drawer = True
             elif np.random.uniform(0, 1) > 0.5:
                 self.is_goal_move_object_out = True
             else:
                 self.is_goal_move_object_in = True
         else:
-            if np.random.uniform(0, 1) > 0.5:
+            if np.random.uniform(0, 1) > self.obj_task_ratio:
                 self.is_goal_move_drawer = True
             else:
                 self.is_goal_move_object_out = True
@@ -560,6 +569,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
         # pair of underlying state and goal image
         if self.is_goal_move_drawer:
             goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
+            while abs(goal_drawer_joint - drawer_joint_state[0]) < self.handle_pos_threshold:
+                goal_drawer_joint = np.random.uniform(*self.drawer_handle_range)
             self.p.resetJointState(self.drawer_id, self.drawer_joint, goal_drawer_joint, 0.)
             _handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
             _count = 0
@@ -911,9 +922,9 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnvState(DrawerObjEnv):
-    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, render_goal=False) -> None:
+    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, render_goal=False, obj_task_ratio=0.5) -> None:
         self.render_goal = render_goal
-        super().__init__(seed, reward_type, view_mode, use_gpu_render)
+        super().__init__(seed, reward_type, view_mode, use_gpu_render, obj_task_ratio)
 
     def _get_obs(self):
         robot_obs = self.robot.get_obs()
