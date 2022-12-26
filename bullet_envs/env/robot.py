@@ -236,13 +236,13 @@ class PandaRobot(object):
         self.p.changeConstraint(c, gearRatio=-1, erp=0.1, maxForce=50)
 
     def get_obs(self):
-        joint_pos = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
-        scaled_joint_pos = 2 * (joint_pos - np.array(self.joint_ll[:7])) / (np.array(self.joint_ul[:7]) - np.array(self.joint_ll[:7])) - 1.0
+        # joint_pos = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
+        # scaled_joint_pos = 2 * (joint_pos - np.array(self.joint_ll[:7])) / (np.array(self.joint_ul[:7]) - np.array(self.joint_ll[:7])) - 1.0
         finger_width = self.get_finger_width()
         scaled_finger_width = finger_width / 0.08
         eef_pos = self.get_eef_position()
-        eef_euler = self.get_eef_orn(as_type="euler") - np.array([np.pi, 0, 0])
-        return np.concatenate([scaled_joint_pos, [scaled_finger_width], eef_pos, eef_euler])
+        eef_euler = self.get_eef_orn(as_type="euler")
+        return np.concatenate([[scaled_finger_width], eef_pos, eef_euler])
 
     def get_eef_position(self):
         eef_pos, *_ = self.p.getLinkState(self.id, self.eef_index)
