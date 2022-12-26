@@ -435,7 +435,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.reward_type = reward_type
     
     def _setup_callback(self):
-        self.robot_eef_range[1][2] = 0.15
+        self.robot_eef_range[1][2] = 0.3
         self.drawer_id = self.p.loadURDF(
             os.path.join(os.path.dirname(__file__), "assets/drawer.urdf"), 
             [0.40000, 0.00000, 0.1], [0.000000, 0.000000, 0.0, 1.0],
@@ -942,12 +942,13 @@ class DrawerObjEnvState(DrawerObjEnv):
             return None
 
 if __name__ == "__main__":
-    env = DrawerObjEnv(view_mode="third")
+    env = DrawerObjEnv(view_mode="third", obj_task_ratio=1.0)
     # env = BoxLidEnv()
     is_success = []
     env.start_rec("test")
     for i in range(10):
         success = False
+        done = False
         traj = {"obs": [], "action": [], "reward": [], "done": []}
         obs = env.reset()
         traj["obs"].append(obs)
@@ -960,10 +961,8 @@ if __name__ == "__main__":
         print("reset obs", obs["privilege_info"])
         print("goal state", goal_state[0], goal_state[2][0])
         # env.start_rec("test")
-        while not success:
+        while not done:
             action = env.oracle_agent(record_traj=True)
-            if action is None:
-                break
             obs, reward, done, info = env.step(action)
             success = info["is_success"]
             traj["obs"].append(obs)
