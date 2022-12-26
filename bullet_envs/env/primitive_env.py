@@ -435,13 +435,15 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.reward_type = reward_type
     
     def _setup_callback(self):
+        self.robot_eef_range[1][2] = 0.15
         self.drawer_id = self.p.loadURDF(
             os.path.join(os.path.dirname(__file__), "assets/drawer.urdf"), 
             [0.40000, 0.00000, 0.1], [0.000000, 0.000000, 0.0, 1.0],
             globalScaling=0.125
         )
         visual_shape = self.p.getVisualShapeData(self.drawer_id)
-        drawer_height = 0.1 if visual_shape[2][3][2] < 0.2 else visual_shape[2][3][2] / 2
+        # drawer_height = 0.1 if visual_shape[2][3][2] < 0.2 else visual_shape[2][3][2] / 2
+        drawer_height = visual_shape[2][3][2]
         self.drawer_range = np.array([
             [0.45, 0.1, drawer_height],
             [0.45, 0.1, drawer_height]
@@ -657,6 +659,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
     
     def step(self, action) -> Tuple[Any, float, bool, Dict[str, Any]]:
         obs, reward, done, info = super().step(action)
+        info["is_goal_move_drawer"] = self.is_goal_move_drawer
         if (self.is_goal_move_object_in or self.is_goal_move_object_out) and self.oracle_step_count > 6:
             done = True
         elif self.is_goal_move_drawer and self.oracle_step_count > 4:
