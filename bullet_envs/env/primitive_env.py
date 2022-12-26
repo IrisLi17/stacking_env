@@ -431,7 +431,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         self.handle_pos_threshold = 0.02
         super().__init__(seed, view_mode, use_gpu_render)
         self.approach_dist = 0.1
-        self.object_pos_threshold = 0.02
+        self.object_pos_threshold = 0.04
         self.reward_type = reward_type
     
     def _setup_callback(self):
