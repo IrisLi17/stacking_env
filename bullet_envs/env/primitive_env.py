@@ -916,7 +916,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
 
     def load_template(self, object_name, scaling=1.0):
         # urdf_path = os.path.join(os.path.dirname(__file__), "assets/ycb_objects", object_name, "model.urdf")
-        urdf_path = os.path.join(os.path.dirname(__file__), "assets/ball_simple.urdf")
+        urdf_path = os.path.join(os.path.dirname(__file__), "assets/cube_simple.urdf")
         self.object_range = np.array([
             [0.45 - 0.15, 0.1 - 0.4, self.drawer_range[0][2]], 
             [0.45 + 0.15, 0.1 + 0.2, self.drawer_range[0][2]]])
