@@ -918,7 +918,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         # urdf_path = os.path.join(os.path.dirname(__file__), "assets/ycb_objects", object_name, "model.urdf")
         urdf_path = os.path.join(os.path.dirname(__file__), "assets/cube_simple.urdf")
         self.object_range = np.array([
-            [0.45 - 0.15, 0.1 - 0.4, self.drawer_range[0][2]], 
+            [0.45 - 0.1, 0.1 - 0.4, self.drawer_range[0][2]], 
             [0.45 + 0.15, 0.1 + 0.2, self.drawer_range[0][2]]])
         # vis_id = self.p.createVisualShape(self.p.GEOM_SPHERE, 0.025, rgbaColor=[0, 1, 0, 1])
         # col_id = self.p.createCollisionShape(self.p.GEOM_SPHERE, 0.025)

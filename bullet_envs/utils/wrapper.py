@@ -181,6 +181,15 @@ class MVPVecPyTorch(VecEnvWrapper):
         privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)
         obs = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
+        for _info in info:
+            if "terminal_observation" in _info:
+                normed_img, normed_goal = self._normalize_obs(_info["terminal_observation"])
+                with torch.no_grad():
+                    scene_feat = self.mvp_model.forward_norm(self.mvp_model.extract_feat(normed_img.float())).squeeze(dim=0)
+                    goal_feat = self.mvp_model.forward_norm(self.mvp_model.extract_feat(normed_goal.float())).squeeze(dim=0)
+                robot_state = torch.from_numpy(_info["terminal_observation"]["robot_state"]).float().to(self.device)
+                privilege_info = torch.from_numpy(_info["terminal_observation"]["privilege_info"]).float().to(self.device)
+                _info["terminal_observation"] = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
         return obs, reward, done, info
 
 
@@ -208,5 +217,8 @@ class VecPyTorch(VecEnvWrapper):
         obs = torch.from_numpy(obs).float().to(self.device)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         # reward = np.expand_dims(reward, axis=1).astype(np.float32)
+        for _info in info:
+            if "terminal_observation" in _info:
+                _info["terminal_observation"] = torch.from_numpy(_info["terminal_observation"]).float().to(self.device)
         return obs, reward, done, info
 
