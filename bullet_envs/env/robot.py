@@ -339,7 +339,8 @@ class PandaRobot(object):
     
     def teleport_joint(self, joint_positions=None, finger=None):
         if joint_positions is None:
-            joint_positions = np.array([0., -0.27, 0.0, -2.5585, 0., 2.2807, 0.7893])
+            # joint_positions = np.array([0., -0.27, 0.0, -2.5585, 0., 2.2807, 0.7893])
+            joint_positions = np.array([0.0006290743156705777, -0.6363918264046711, -0.00048377514187155377, -2.498912361135347, -0.000301933506133224, 1.8636677063581644, 0.7857285239452109])
         if finger is None:
             finger = 0.04
         for idx, j in enumerate(self.motor_indices[:7]):

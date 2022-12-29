@@ -151,7 +151,12 @@ class BasePrimitiveEnv(gym.Env):
         self.p.setTimeStep(self.dt)
         self.p.setGravity(0., 0., -9.8)
         self.p.resetDebugVisualizerCamera(1.0, 40, -20, [0, 0, 0,] )
-        plane_id = self.p.loadURDF(os.path.join(DATAROOT, "plane.urdf"), [0, 0, -0.795])
+        # plane_id = self.p.loadURDF(os.path.join(DATAROOT, "plane.urdf"), [0, 0, -0.795])
+        plane_id = self.p.loadURDF(os.path.join(os.path.dirname(__file__), "assets/plane.urdf"), [0, 0, -0.795])
+        # get a doormat
+        vis_id = self.p.createVisualShape(self.p.GEOM_BOX, halfExtents=[5, 5, 0.02], rgbaColor=[1, 1, 1, 1])
+        col_id = self.p.createCollisionShape(self.p.GEOM_BOX, halfExtents=[5, 5, 0.02])
+        self.p.createMultiBody(0.1, col_id, vis_id, [0, 0, -0.775], [0., 0., 0., 1.])
         table_id = self.p.loadURDF(
             os.path.join(DATAROOT, "table/table.urdf"), 
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
@@ -231,7 +236,7 @@ def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = N
         # up_vector = np.array([0, 0, -1])
         view_matrix = client.computeViewMatrix(eye_position, target_position, up_vector)
         proj_matrix = client.computeProjectionMatrixFOV(
-            fov=120, aspect=1.0, nearVal=0.01, farVal=10.0
+            fov=90, aspect=1.0, nearVal=0.01, farVal=10.0
         )
     else:
         raise NotImplementedError
@@ -943,7 +948,7 @@ class DrawerObjEnvState(DrawerObjEnv):
             return None
 
 if __name__ == "__main__":
-    env = DrawerObjEnv(view_mode="third", obj_task_ratio=1.0)
+    env = DrawerObjEnv(view_mode="third", obj_task_ratio=0.0)
     # env = BoxLidEnv()
     is_success = []
     env.start_rec("test")
