@@ -229,7 +229,7 @@ def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = N
         eef_pos = robot.get_eef_position().reshape((3, 1))
         eef_rot = np.array(client.getMatrixFromQuaternion(robot.get_eef_orn())).reshape((3, 3))
         # TODO
-        eef_t_cam = np.array([0.06, 0.0, -0.04]).reshape((3, 1))
+        eef_t_cam = np.array([0.05, 0.0, -0.05]).reshape((3, 1))
         eye_position = eef_rot @ eef_t_cam + eef_pos
         target_position = eye_position + eef_rot @ np.array([0, 0, 1]).reshape((3, 1))
         up_vector = eef_rot @ np.array([1, 0, 0])
@@ -948,7 +948,7 @@ class DrawerObjEnvState(DrawerObjEnv):
             return None
 
 if __name__ == "__main__":
-    env = DrawerObjEnv(view_mode="third", obj_task_ratio=0.0)
+    env = DrawerObjEnv(view_mode="ego", obj_task_ratio=0.0)
     # env = BoxLidEnv()
     is_success = []
     env.start_rec("test")
