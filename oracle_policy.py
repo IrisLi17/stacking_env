@@ -6,8 +6,8 @@ import pickle
 
 def main():
     desired_timestep = 100_000
-    env_mode = "third" # "third", "state"
-    obj_task_ratio = 1.0
+    env_mode = "ego" # "third", "state"
+    obj_task_ratio = 0.7
     num_workers = 64
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if env_mode == "state":
@@ -56,6 +56,7 @@ def main():
     all_demos["obs"] = np.concatenate(all_demos["obs"], axis=0)
     all_demos["action"] = np.concatenate(all_demos["action"], axis=0)
     all_demos["terminate_obs"] = np.stack(all_demos["terminate_obs"], axis=0)
+    all_demos["boundary"] = np.array(all_demos["boundary"])
     with open("warmup_dataset_%s_obj%.01f.pkl" % (env_mode, obj_task_ratio), "wb") as f:
         pickle.dump(all_demos, f)
 
