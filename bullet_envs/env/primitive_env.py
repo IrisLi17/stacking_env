@@ -627,8 +627,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_object_pos = self.p.getBasePositionAndOrientation(self.object_id)[0]
         handle_dist = abs(self.goal["state"][0] - cur_handle_joint)
         object_dist = np.linalg.norm(np.array(self.goal["state"][2][0]) - np.array(cur_object_pos))
-        # is_success = handle_dist < self.handle_pos_threshold and object_dist < self.object_pos_threshold
-        is_success = object_dist < self.object_pos_threshold if (self.is_goal_move_object_in or self.is_goal_move_object_out) else handle_dist < self.handle_pos_threshold
+        is_success = handle_dist < self.handle_pos_threshold and object_dist < self.object_pos_threshold
+        # is_success = object_dist < self.object_pos_threshold if (self.is_goal_move_object_in or self.is_goal_move_object_out) else handle_dist < self.handle_pos_threshold
         if self.reward_type == "sparse":
             reward = float(is_success)
         elif self.reward_type == "dense_stage":
