@@ -28,11 +28,13 @@ class PrimitiveType:
 
 
 class BasePrimitiveEnv(gym.Env):
-    def __init__(self, seed=None, view_mode="third", use_gpu_render=True) -> None:
+    def __init__(self, seed=None, view_mode="third", use_gpu_render=True, 
+                 shift_params=(0, 0)) -> None:
         super().__init__()
         self.seed(seed)
         self.view_mode = view_mode
         self.use_gpu_render = use_gpu_render
+        self.shift_params = shift_params
         self._setup_env()
         self.privilege_dim = None
         self.goal = self.sample_goal()
@@ -70,7 +72,8 @@ class BasePrimitiveEnv(gym.Env):
         self.goal = self.sample_goal()
         self.robot.reset_primitive(
             gripper_status, self._get_graspable_objects(), 
-            partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128), 
+            partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128, 
+                    shift_params=self.shift_params), 
             self.goal["img"].transpose((1, 2, 0)) if self.goal["img"] is not None else None)
         obs = self._get_obs()
         return obs    
@@ -113,7 +116,7 @@ class BasePrimitiveEnv(gym.Env):
         return reward, info
     
     def render(self, width=500, height=500):
-        return render(self.p, width, height, self.robot, self.view_mode)
+        return render(self.p, width, height, self.robot, self.view_mode, self.shift_params)
 
     def start_rec(self, video_filename):
         assert self.record_cfg
@@ -177,7 +180,8 @@ class BasePrimitiveEnv(gym.Env):
         pass
 
     def _get_obs(self):
-        scene = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        scene = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode,
+                       shift_params=self.shift_params).transpose((2, 0, 1))[:3]
         robot_obs = self.robot.get_obs()
         privilege_info = self._get_privilege_info()
         if self.privilege_dim is None:
@@ -188,31 +192,13 @@ class BasePrimitiveEnv(gym.Env):
     def _get_graspable_objects(self):
         return ()
     
-    def _get_ego_view(self, width, height):
-        eef_pos = self.robot.get_eef_position().reshape((3, 1))
-        eef_rot = np.array(self.p.getMatrixFromQuaternion(self.robot.get_eef_orn())).reshape((3, 3))
-        # TODO
-        eef_t_cam = np.array([0.06, 0.0, -0.04]).reshape((3, 1))
-        eye_position = eef_rot @ eef_t_cam + eef_pos
-        target_position = eye_position + eef_rot @ np.array([0, 0, 1]).reshape((3, 1))
-        up_vector = eef_rot @ np.array([1, 0, 0])
-        # up_vector = np.array([0, 0, -1])
-        view_matrix = self.p.computeViewMatrix(eye_position, target_position, up_vector)
-        proj_matrix = self.p.computeProjectionMatrixFOV(
-            fov=120, aspect=1.0, nearVal=0.01, farVal=10.0
-        )
-        (_, _, px, _, _) = self.p.getCameraImage(
-            width=width, height=height, viewMatrix=view_matrix, projectionMatrix=proj_matrix,
-        )
-        rgb_array = np.array(px, dtype=np.uint8)
-        rgb_array = np.reshape(rgb_array, (height, width, 4))
-        return rgb_array
-    
     def _get_privilege_info(self):
         return np.empty(0)
 
 
-def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third") -> np.ndarray:
+def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third",
+           shift_params=(0, 0)) -> np.ndarray:
+    shift_param = np.random.randint(shift_params[0], shift_params[1] + 1, size=(2,))
     if view_mode == "third":
         view_matrix = client.computeViewMatrixFromYawPitchRoll(
             cameraTargetPosition=(0.45, 0, 0.1),
@@ -245,8 +231,20 @@ def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = N
     )
     rgb_array = np.array(px, dtype=np.uint8)
     rgb_array = np.reshape(rgb_array, (height, width, 4))
+    if shift_param[0] == 0 and shift_param[1] == 0:
+        transformed_img = rgb_array
+    else:
+        transformed_img = np.zeros_like(rgb_array)
+        if shift_param[0] >= 0 and shift_param[1] >=0:
+            transformed_img[shift_param[0]:, shift_param[1]:] = rgb_array[:height - shift_param[0], :width - shift_param[1]]
+        elif shift_param[0] >= 0 and shift_param[1] < 0:
+            transformed_img[shift_param[0]:, :width + shift_param[1]] = rgb_array[:height - shift_param[0], -shift_param[1]:]
+        elif shift_param[0] < 0 and shift_param[1] >= 0:
+            transformed_img[:height + shift_param[0], shift_param[1]:] = rgb_array[-shift_param[0]:, :width - shift_param[1]]
+        else:
+            transformed_img[:height + shift_param[0], :width + shift_param[1]] = rgb_array[-shift_param[0]:, -shift_param[1]:]
 
-    return rgb_array
+    return transformed_img
 
 
 # def process_img(color, depth, cam_config):
@@ -340,7 +338,8 @@ class BoxLidEnv(BasePrimitiveEnv):
         self.p.stepSimulation()
         _robot_xyz = np.array([np.random.uniform(0.35, 0.45), np.random.uniform(-0.1, 0.1), np.random.uniform(0.25, 0.3)])
         self.robot.control(_robot_xyz, np.array([1, 0, 0, 0]), 0.04, relative=False, teleport=True)
-        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode,
+                          shift_params=self.shift_params).transpose((2, 0, 1))[:3]
         goal_robot_config = self.robot.get_obs()
         goal_lid_pos, goal_lid_quat = self.p.getLinkState(self.box_lid_id, self.box_lid_link)[:2]
         goal_dict = {'state': (np.array(goal_lid_pos), np.array(goal_lid_quat)), 'img': goal_img, 'robot_config': goal_robot_config}
@@ -431,10 +430,11 @@ class BoxLidEnv(BasePrimitiveEnv):
 
 
 class DrawerObjEnv(BasePrimitiveEnv):
-    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, obj_task_ratio=0.5) -> None:
+    def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, 
+                 obj_task_ratio=0.5, shift_params=(0, 0)) -> None:
         self.obj_task_ratio = obj_task_ratio
         self.handle_pos_threshold = 0.02
-        super().__init__(seed, view_mode, use_gpu_render)
+        super().__init__(seed, view_mode, use_gpu_render, shift_params)
         self.approach_dist = 0.1
         self.object_pos_threshold = 0.04
         self.reward_type = reward_type
@@ -618,7 +618,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
         return goal_dict
     
     def _get_goal_image(self):
-        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode).transpose((2, 0, 1))[:3]
+        goal_img = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode, 
+                          shift_params=self.shift_params).transpose((2, 0, 1))[:3]
         return goal_img
     
     def compute_reward_and_info(self):
@@ -672,7 +673,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
             done = True
         return obs, reward, done, info
     
-    def oracle_agent(self, record_traj=False):
+    def oracle_agent(self, record_traj=False, noise_std=0.0):
         if self.is_goal_move_object_in or self.is_goal_move_object_out:
             # should move object
             action = self.take_out_object(self.goal["state"][2][0], record_traj)
@@ -680,6 +681,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
             # should move drawer
             action = self.perturb_drawer(self.goal["state"][0], record_traj)
         action[1:] = np.clip(action[1:], -1., 1.)
+        # TODO: add some noise?
+        action[1:] += np.random.normal() * noise_std
         self.oracle_step_count += 1
         return action
     
@@ -948,7 +951,7 @@ class DrawerObjEnvState(DrawerObjEnv):
             return None
 
 if __name__ == "__main__":
-    env = DrawerObjEnv(view_mode="ego", obj_task_ratio=0.0)
+    env = DrawerObjEnv(view_mode="ego", obj_task_ratio=1.0)
     # env = BoxLidEnv()
     is_success = []
     env.start_rec("test")
