@@ -6,8 +6,9 @@ import pickle
 
 def main():
     desired_timestep = 100_000
-    env_mode = "ego" # "third", "state"
+    env_mode = "third" # "third", "state"
     obj_task_ratio = 0.7
+    noisy_img = False
     num_workers = 64
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if env_mode == "state":
@@ -16,7 +17,10 @@ def main():
         )
     else:
         create_env_kwargs = dict(
-            kwargs=dict(reward_type="sparse", view_mode=env_mode, obj_task_ratio=obj_task_ratio),
+            kwargs=dict(
+                reward_type="sparse", view_mode=env_mode, obj_task_ratio=obj_task_ratio,
+                shift_params=(-5, 5) if noisy_img else (0, 0)
+            ),
         )
     env = make_vec_env(
         "BulletDrawerState-v1" if env_mode == "state" else "BulletDrawer-v1", 
@@ -31,7 +35,7 @@ def main():
     for i in range(num_workers):
         traj_cache[i]["obs"].append(obs[i])
     while total_timestep < desired_timestep:
-        action = env.env_method("oracle_agent")
+        action = env.env_method("oracle_agent", noise_std=0.01 if noisy_img else 0.)
         action = torch.from_numpy(np.array(action)).to(device)
         obs, reward, done, info = env.step(action)
         for i in range(num_workers):
@@ -57,7 +61,8 @@ def main():
     all_demos["action"] = np.concatenate(all_demos["action"], axis=0)
     all_demos["terminate_obs"] = np.stack(all_demos["terminate_obs"], axis=0)
     all_demos["boundary"] = np.array(all_demos["boundary"])
-    with open("warmup_dataset_%s_obj%.01f.pkl" % (env_mode, obj_task_ratio), "wb") as f:
+    with open("warmup_dataset_%s_obj%.01f%s.pkl" % (
+        env_mode, obj_task_ratio, "_noisy" if noisy_img else ""), "wb") as f:
         pickle.dump(all_demos, f)
 
 def predict_privilege():

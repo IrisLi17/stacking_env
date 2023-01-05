@@ -6,7 +6,7 @@ if __name__ == "__main__":
     env_id = "BulletDrawerState-v1"
     num_worker = 1
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    render = False
+    render = True
     env = make_vec_env(env_id, num_worker, device, kwargs={
         "reward_type": "dense", "use_gpu_render": render and torch.cuda.is_available(), "render_goal": render, "obj_task_ratio": 1.0
     })
@@ -18,12 +18,13 @@ if __name__ == "__main__":
     obs = env.reset()
     initial_obs = obs[0][-8:]
     print("initial obs", initial_obs)
-    for i in range(2000):
+    for i in range(100):
         action = torch.from_numpy(np.concatenate(
             [np.random.randint(0, 3, size=(num_worker, 1)), 
             np.random.uniform(-1, 1, size=(num_worker, 4))], axis=-1
         )).float().to(device)
         obs, reward, done, info = env.step(action)
+        print(obs)
         if done[0]:
             total_episode += 1
             print("terminal obs", info[0]["terminal_observation"][-6:])
