@@ -32,6 +32,9 @@ def _worker(remote, parent_remote, env_fn_wrapper, reset_when_done):
             elif cmd == 'close':
                 remote.close()
                 break
+            elif cmd == 'get_obs':
+                observation = env.get_obs()
+                remote.send(observation)
             elif cmd == 'get_spaces':
                 remote.send((env.observation_space, env.action_space))
             elif cmd == 'env_method':
@@ -141,6 +144,13 @@ class SubprocVecEnv(VecEnv):
         imgs = [pipe.recv() for pipe in self.remotes]
         return imgs
 
+    def get_obs(self, indices=None):
+        target_remotes = self._get_target_remotes(indices)
+        for remote in target_remotes:
+            remote.send(('get_obs', None))
+        obs = [remote.recv() for remote in target_remotes]
+        return _flatten_obs(obs, self.observation_space)
+    
     def get_attr(self, attr_name, indices=None):
         """Return attribute from vectorized environment (see base class)."""
         target_remotes = self._get_target_remotes(indices)
@@ -156,6 +166,13 @@ class SubprocVecEnv(VecEnv):
         for remote in target_remotes:
             remote.recv()
 
+    def dispatch_set_attr(self, attr_name, value, indices=None):
+        target_remotes = self._get_target_remotes(indices)
+        for idx, remote in enumerate(target_remotes):
+            remote.send(('set_attr', (attr_name, value[idx])))
+        for remote in target_remotes:
+            remote.recv()
+    
     def env_method(self, method_name, *method_args, indices=None, **method_kwargs):
         """Call instance methods of vectorized environments."""
         target_remotes = self._get_target_remotes(indices)

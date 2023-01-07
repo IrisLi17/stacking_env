@@ -12,6 +12,7 @@ from gym.utils import seeding
 from pybullet_utils import bullet_client as bc
 from typing import Any, Dict, Tuple
 from collections import OrderedDict
+from collections import deque
 from functools import partial
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
@@ -29,7 +30,7 @@ class PrimitiveType:
 
 class BasePrimitiveEnv(gym.Env):
     def __init__(self, seed=None, view_mode="third", use_gpu_render=True, 
-                 shift_params=(0, 0)) -> None:
+                 shift_params=(0, 0), feature_dim=768) -> None:
         super().__init__()
         self.seed(seed)
         self.view_mode = view_mode
@@ -37,6 +38,8 @@ class BasePrimitiveEnv(gym.Env):
         self.shift_params = shift_params
         self._setup_env()
         self.privilege_dim = None
+        self.feature_dim = feature_dim
+        self.task_queue = deque()
         self.goal = self.sample_goal()
         obs = self._get_obs()
         if isinstance(obs, dict):
@@ -62,14 +65,18 @@ class BasePrimitiveEnv(gym.Env):
         return 1. / 240
 
     def reset(self):
-        self.oracle_step_count = 0
-        self._reset_sim()
+        if len(self.task_queue) == 0:
+            self.oracle_step_count = 0
+            self._reset_sim()
+            # sample goal
+            self.goal = self.sample_goal()
+        else:
+            task_array = self.task_queue.popleft()
+            self.set_task(task_array)
         if self.robot.get_finger_width() > 0.07:
             gripper_status = "open"
         else:
             gripper_status = "close"
-        # sample goal
-        self.goal = self.sample_goal()
         self.robot.reset_primitive(
             gripper_status, self._get_graspable_objects(), 
             partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128, 
@@ -108,7 +115,7 @@ class BasePrimitiveEnv(gym.Env):
         return new_obs, reward, done, info
     
     def sample_goal(self):
-        return {"state": None, "img": None}
+        return {"state": None, "img": None, "feature": None, "source": None}
 
     def compute_reward_and_info(self):
         reward = 0
@@ -142,6 +149,9 @@ class BasePrimitiveEnv(gym.Env):
             self.robot.video_writer.close()
         self.robot.save_video = False
 
+    def get_obs(self):
+        return self._get_obs()
+    
     def _setup_env(self, init_qpos=None, base_position=(0, 0, 0)):
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
         if self.use_gpu_render:
@@ -187,14 +197,20 @@ class BasePrimitiveEnv(gym.Env):
         if self.privilege_dim is None:
             self.privilege_dim = privilege_info.shape[0]
         return {"img": scene, "robot_state": robot_obs, 
-                "goal": self.goal["img"], "privilege_info": privilege_info}
+                "goal": self.goal["img"], "privilege_info": privilege_info,
+                "goal_feature": self.goal["feature"], "goal_source": self.goal["source"]}
     
     def _get_graspable_objects(self):
         return ()
     
     def _get_privilege_info(self):
         return np.empty(0)
+    
+    def set_task(self, task_array):
+        raise NotImplementedError
 
+    def add_tasks(self, task_arrays):
+        self.task_queue.extend(task_arrays)
 
 def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third",
            shift_params=(0, 0)) -> np.ndarray:
@@ -537,7 +553,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_drawer = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         goal_drawer = self.goal["state"][0]
         cur_object_pos = self.p.getBasePositionAndOrientation(self.object_id)[0]
-        goal_object_pos = self.goal["state"][2][0]
+        goal_object_pos = self.goal["state"][1]
         return np.concatenate([np.array([cur_drawer, goal_drawer]), cur_object_pos, goal_object_pos])
 
     def sample_goal(self):
@@ -609,7 +625,8 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_handle_pos = self.p.getLinkState(self.drawer_id, self.drawer_handle_link)[0]
         cur_object_pose = self.p.getBasePositionAndOrientation(self.object_id)
         goal_img = self._get_goal_image()
-        goal_dict = {'state': (cur_drawer_joint, cur_handle_pos, cur_object_pose), 'img': goal_img}
+        goal_dict = {'state': (cur_drawer_joint, cur_object_pose[0]), 'img': goal_img, 
+                     'feature': np.zeros(self.feature_dim), 'source': np.array([0])}
 
         # recover state
         self.p.resetJointState(self.drawer_id, self.drawer_joint, drawer_joint_state[0], drawer_joint_state[1])
@@ -626,7 +643,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         cur_handle_joint = self.p.getJointState(self.drawer_id, self.drawer_joint)[0]
         cur_object_pos = self.p.getBasePositionAndOrientation(self.object_id)[0]
         handle_dist = abs(self.goal["state"][0] - cur_handle_joint)
-        object_dist = np.linalg.norm(np.array(self.goal["state"][2][0]) - np.array(cur_object_pos))
+        object_dist = np.linalg.norm(np.array(self.goal["state"][1]) - np.array(cur_object_pos))
         is_success = handle_dist < self.handle_pos_threshold and object_dist < self.object_pos_threshold
         # is_success = object_dist < self.object_pos_threshold if (self.is_goal_move_object_in or self.is_goal_move_object_out) else handle_dist < self.handle_pos_threshold
         if self.reward_type == "sparse":
@@ -676,7 +693,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
     def oracle_agent(self, record_traj=False, noise_std=0.0):
         if self.is_goal_move_object_in or self.is_goal_move_object_out:
             # should move object
-            action = self.take_out_object(self.goal["state"][2][0], record_traj)
+            action = self.take_out_object(self.goal["state"][1], record_traj)
         else:
             # should move drawer
             action = self.perturb_drawer(self.goal["state"][0], record_traj)
@@ -933,6 +950,24 @@ class DrawerObjEnv(BasePrimitiveEnv):
         # self.object_id = self.p.createMultiBody(0.1, col_id, vis_id, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.])
         self.object_id = self.p.loadURDF(urdf_path, [0.4, -0.2, self.object_range[0][2]], [0., 0., 0., 1.], globalScaling=scaling)
 
+    def set_task(self, task_array):
+        robot_state_dim = self.observation_space["robot_state"].shape[0]
+        privilege_info_dim = self.observation_space["privilege_info"].shape[0]
+        assert task_array.shape[0] == robot_state_dim + privilege_info_dim + self.feature_dim
+        robot_state = task_array[:robot_state_dim]
+        self.robot.control(eef_pos=robot_state[:3], eef_orn=self.p.getQuaternionFromEuler(robot_state[3:6]), finger=robot_state[6] / 2, relative=False, teleport=True)
+        init_drawer_state, goal_drawer_state = task_array[robot_state_dim], task_array[robot_state_dim + 1]
+        init_object_pos, goal_object_pos = task_array[robot_state_dim + 2: robot_state_dim + 5], task_array[robot_state_dim + 5: robot_state_dim + 8]
+        rand_angle = np.random.uniform(-np.pi / 6, np.pi / 6)
+        init_object_orn = (0., 0., np.sin(rand_angle / 2), np.cos(rand_angle / 2))
+        self.p.resetJointState(self.drawer_id, self.drawer_joint, init_drawer_state)
+        self.p.resetBasePositionAndOrientation(self.object_id, init_object_pos, init_object_orn)
+        # Set from agent generated task
+        self.goal["state"] = (goal_drawer_state, goal_object_pos)
+        # dummy, since image feature will be set separately
+        self.goal["img"] = np.zeros((3, 128, 128))
+        self.goal["feature"] = task_array[robot_state_dim + privilege_info_dim:]
+        self.goal["source"] = np.array([1])
 
 class DrawerObjEnvState(DrawerObjEnv):
     def __init__(self, seed=None, reward_type="dense", view_mode="third", use_gpu_render=True, render_goal=False, obj_task_ratio=0.5) -> None:
