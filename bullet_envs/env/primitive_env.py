@@ -39,7 +39,7 @@ class BasePrimitiveEnv(gym.Env):
         self._setup_env()
         self.privilege_dim = None
         self.feature_dim = feature_dim
-        self.task_queue = deque()
+        self.task_queue = []
         self.goal = self.sample_goal()
         obs = self._get_obs()
         if isinstance(obs, dict):
@@ -71,7 +71,7 @@ class BasePrimitiveEnv(gym.Env):
             # sample goal
             self.goal = self.sample_goal()
         else:
-            task_array = self.task_queue.popleft()
+            task_array = self.task_queue[np.random.randint(len(self.task_queue))]
             self.set_task(task_array)
         if self.robot.get_finger_width() > 0.07:
             gripper_status = "open"
@@ -955,7 +955,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         privilege_info_dim = self.observation_space["privilege_info"].shape[0]
         assert task_array.shape[0] == robot_state_dim + privilege_info_dim + self.feature_dim
         robot_state = task_array[:robot_state_dim]
-        self.robot.control(eef_pos=robot_state[:3], eef_orn=self.p.getQuaternionFromEuler(robot_state[3:6]), finger=robot_state[6] / 2, relative=False, teleport=True)
+        self.robot.control(eef_pos=robot_state[1:4], eef_orn=self.p.getQuaternionFromEuler(robot_state[4:7]), finger=robot_state[0] / 0.08 / 2, relative=False, teleport=True)
         init_drawer_state, goal_drawer_state = task_array[robot_state_dim], task_array[robot_state_dim + 1]
         init_object_pos, goal_object_pos = task_array[robot_state_dim + 2: robot_state_dim + 5], task_array[robot_state_dim + 5: robot_state_dim + 8]
         rand_angle = np.random.uniform(-np.pi / 6, np.pi / 6)
@@ -965,7 +965,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         # Set from agent generated task
         self.goal["state"] = (goal_drawer_state, goal_object_pos)
         # dummy, since image feature will be set separately
-        self.goal["img"] = np.zeros((3, 128, 128))
+        self.goal["img"] = np.zeros((3, 128, 128), dtype=np.uint8)
         self.goal["feature"] = task_array[robot_state_dim + privilege_info_dim:]
         self.goal["source"] = np.array([1])
 
