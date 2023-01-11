@@ -955,7 +955,7 @@ class DrawerObjEnv(BasePrimitiveEnv):
         privilege_info_dim = self.observation_space["privilege_info"].shape[0]
         assert task_array.shape[0] == robot_state_dim + privilege_info_dim + self.feature_dim
         robot_state = task_array[:robot_state_dim]
-        self.robot.control(eef_pos=robot_state[1:4], eef_orn=self.p.getQuaternionFromEuler(robot_state[4:7]), finger=robot_state[0] / 0.08 / 2, relative=False, teleport=True)
+        self.robot.control(eef_pos=robot_state[1:4], eef_orn=self.p.getQuaternionFromEuler(robot_state[4:7]), finger=robot_state[0] * 0.08 / 2, relative=False, teleport=True)
         init_drawer_state, goal_drawer_state = task_array[robot_state_dim], task_array[robot_state_dim + 1]
         init_object_pos, goal_object_pos = task_array[robot_state_dim + 2: robot_state_dim + 5], task_array[robot_state_dim + 5: robot_state_dim + 8]
         rand_angle = np.random.uniform(-np.pi / 6, np.pi / 6)
