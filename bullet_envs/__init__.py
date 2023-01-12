@@ -1,6 +1,7 @@
 import gym
 from bullet_envs.env.robot_arm_env import ArmStack, ArmPickAndPlace
 from bullet_envs.env.primitive_env import DrawerObjEnv, DrawerObjEnvState
+from bullet_envs.env.pixel_stacking import PixelStack
 
 
 gym.register(
@@ -24,4 +25,8 @@ gym.register(
 
 gym.register(
     "BulletDrawerState-v1", entry_point=DrawerObjEnvState, max_episode_steps=20
+)
+
+gym.register(
+    "BulletPixelStack-v1", entry_point=PixelStack, max_episode_steps=20,
 )
