@@ -32,7 +32,7 @@ def main():
     for i in range(num_workers):
         traj_cache[i]["img"].append(obs[i][:768])
         traj_cache[i]["robot"].append(obs[i][768: 768 + 7])
-        traj_cache[i]["state"].append(obs[i][768 * 2 + 7:])
+        traj_cache[i]["state"].append(obs[i][768 * 2 + 7:].reshape(2, -1)[0])
     while total_timestep < desired_timestep:
         action = torch.cat(env.env_method("act"), dim=0).to(device)
         # print(action)
@@ -53,24 +53,28 @@ def main():
                     traj_cache[i]["img"][-1] = terminate_obs[:768]
                     traj_cache[i]["robot"][-1] = terminate_obs[768: 768 + 7]
                     traj_cache[i]["state"][-1] = terminate_obs[768 * 2 + 7:].reshape(2, -1)[0]
-                    # TODO: do full relabel before storing into the buffer
-                    for _s_idx in range(len(traj_cache[i]["img"]) - 1):
-                        _e_idx = _s_idx + 1
-                        _cur_img = traj_cache[i]["img"][_s_idx]
-                        _cur_robot = traj_cache[i]["robot"][_s_idx]
-                        _cur_state = traj_cache[i]["state"][_s_idx]
-                        _goal_img = traj_cache[i]["img"][_e_idx]
-                        _goal_state = traj_cache[i]["state"][_e_idx]
-                        relabeled_obs = torch.cat([_cur_img, _cur_robot, _goal_img, _cur_state, _goal_state])
-                        # assert np.all(np.array(traj_cache[i]["done"][:-1]) == False)
-                        # assert np.all(np.array(traj_cache[i]["reward"][:-1]) == 0), (traj_cache[i]["reward"])
-                        # assert traj_cache[i]["reward"][-1] == 1, (traj_cache[i]["reward"][-1])
-                        all_demos["obs"].append(relabeled_obs.detach().cpu().numpy())
-                        all_demos["action"].append(traj_cache[i]["action"][_s_idx].cpu().numpy())
-                        total_timestep += 1
-                        if total_timestep % 100 == 0:
-                            print(total_timestep)
-                traj_cache[i] = dict(img=[obs[i][:768]], robot=[obs[i][768: 768 + 7]], state=[obs[i][768 * 2 + 7:]], action=[])
+                    if not torch.all(traj_cache[i]["action"][0] == -1):
+                        # TODO: store all tasks
+                        for _s_idx in range(len(traj_cache[i]["img"]) - 1):
+                            _e_idx = _s_idx + 1
+                            _cur_img = traj_cache[i]["img"][_s_idx]
+                            _cur_robot = traj_cache[i]["robot"][_s_idx]
+                            _cur_state = traj_cache[i]["state"][_s_idx]
+                            _goal_img = traj_cache[i]["img"][_e_idx]
+                            _goal_state = traj_cache[i]["state"][_e_idx]
+                            relabeled_obs = torch.cat([_cur_img, _cur_robot, _goal_img, _cur_state, _goal_state])
+                            # assert np.all(np.array(traj_cache[i]["done"][:-1]) == False)
+                            # assert np.all(np.array(traj_cache[i]["reward"][:-1]) == 0), (traj_cache[i]["reward"])
+                            # assert traj_cache[i]["reward"][-1] == 1, (traj_cache[i]["reward"][-1])
+                            all_demos["obs"].append(relabeled_obs.detach().cpu().numpy())
+                            assert not torch.all(traj_cache[i]["action"][_s_idx] == -1)
+                            all_demos["action"].append(traj_cache[i]["action"][_s_idx].cpu().numpy())
+                            total_timestep += 1
+                            if total_timestep % 100 == 0:
+                                print(total_timestep)
+                traj_cache[i] = dict(
+                    img=[obs[i][:768]], robot=[obs[i][768: 768 + 7]], 
+                    state=[obs[i][768 * 2 + 7:].reshape(2, -1)[0]], action=[])
     all_demos["obs"] = np.stack(all_demos["obs"], axis=0)
     all_demos["action"] = np.stack(all_demos["action"], axis=0)
     # all_demos["terminate_obs"] = np.stack(all_demos["terminate_obs"], axis=0)

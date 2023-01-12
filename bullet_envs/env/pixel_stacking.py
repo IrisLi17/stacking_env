@@ -12,6 +12,8 @@ from bullet_envs.env.primitive_env import render, BasePrimitiveEnv
 import os
 import numpy as np
 from functools import partial
+import pybullet as p
+from pybullet_utils import bullet_client as bc
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
 
@@ -31,13 +33,18 @@ class PixelStack(ArmStack):
         # )
         super().__init__(*args, **kwargs)
     
-    def _setup_callback(self):
-        super()._setup_callback()
+    def _create_simulation(self):
+        self.p = bc.BulletClient(connection_mode=p.DIRECT)
         if self.use_gpu_render:
             plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
             print("plugin=", plugin)
             self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
             self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
+    
+    def _setup_callback(self):
+        super()._setup_callback()
+        for shape in self.p.getVisualShapeData(self.robot.id):
+            self.p.changeVisualShape(self.robot.id, shape[1], rgbaColor=(0, 0, 0, 0))
 
     def reset(self):
         if len(self.task_queue) == 0:
@@ -58,7 +65,8 @@ class PixelStack(ArmStack):
     def _get_obs(self):
         # TODO: tweak view angle, or simply make the robot invisible
         scene = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode,
-                       shift_params=self.shift_params).transpose((2, 0, 1))[:3]
+                       shift_params=self.shift_params, pitch=-45, distance=0.6,
+                       camera_target_position=(0.5, 0.0, 0.1)).transpose((2, 0, 1))[:3]
         robot_obs = self.robot.get_obs()
         privilege_info = self._get_privilege_info()
         if self.privilege_dim is None:
@@ -103,7 +111,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     env = PixelStack(
         n_object=6, reward_type="sparse", action_dim=7, generate_data=True, primitive=True,
-        n_to_stack=np.array([[1, 2, 3]]), name="allow_rotation", use_gpu_render=False,
+        n_to_stack=np.array([[1, 2, 3]]), name="allow_rotation", use_gpu_render=True,
     )
     print("created env")
     obs = env.reset()

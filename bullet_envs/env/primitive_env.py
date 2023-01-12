@@ -213,15 +213,16 @@ class BasePrimitiveEnv(gym.Env):
         self.task_queue.extend(task_arrays)
 
 def render(client: bc.BulletClient, width=256, height=256, robot: PandaRobot = None, view_mode="third",
-           shift_params=(0, 0)) -> np.ndarray:
+           shift_params=(0, 0), camera_target_position=(0.45, 0.0, 0.1), distance=0.6, yaw=90,
+           pitch=-45, roll=0) -> np.ndarray:
     shift_param = np.random.randint(shift_params[0], shift_params[1] + 1, size=(2,))
     if view_mode == "third":
         view_matrix = client.computeViewMatrixFromYawPitchRoll(
-            cameraTargetPosition=(0.45, 0, 0.1),
-            distance=0.6,
-            yaw=90,
-            pitch=-45,
-            roll=0,
+            cameraTargetPosition=camera_target_position,
+            distance=distance,
+            yaw=yaw,
+            pitch=pitch,
+            roll=roll,
             upAxisIndex=2,
         )
         proj_matrix = client.computeProjectionMatrixFOV(
@@ -999,9 +1000,10 @@ if __name__ == "__main__":
         cur_img = obs["img"]
         goal_img = obs["goal"]
         goal_state = env.goal["state"]
-        # import matplotlib.pyplot as plt
-        # plt.imsave("cur_img.png", cur_img.transpose((1, 2, 0)))
-        # plt.imsave("goal_img.png", goal_img.transpose((1, 2, 0)))
+        import matplotlib.pyplot as plt
+        plt.imsave("cur_img.png", cur_img.transpose((1, 2, 0)))
+        plt.imsave("goal_img.png", goal_img.transpose((1, 2, 0)))
+        exit()
         print("reset obs", obs["privilege_info"])
         print("goal state", goal_state[0], goal_state[2][0])
         # env.start_rec("test")

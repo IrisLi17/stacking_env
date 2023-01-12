@@ -49,13 +49,20 @@ class ArmGoalEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    def _setup_env(self, robot, init_qpos=None, base_position=(0, 0, 0)):
+    def _create_simulation(self):
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
+    
+    def _setup_env(self, robot, init_qpos=None, base_position=(0, 0, 0)):
+        self._create_simulation()
         self.p.resetSimulation()
         self.p.setTimeStep(self.dt)
         self.p.setGravity(0., 0., -9.8)
         self.p.resetDebugVisualizerCamera(1.0, 40, -20, [0, 0, 0, ])
-        plane_id = self.p.loadURDF(os.path.join(DATAROOT, "plane.urdf"), [0, 0, -0.795])
+        plane_id = self.p.loadURDF(os.path.join(os.path.dirname(__file__), "assets/plane.urdf"), [0, 0, -0.795])
+        # get a doormat
+        vis_id = self.p.createVisualShape(self.p.GEOM_BOX, halfExtents=[5, 5, 0.02], rgbaColor=[1, 1, 1, 1])
+        col_id = self.p.createCollisionShape(self.p.GEOM_BOX, halfExtents=[5, 5, 0.02])
+        self.p.createMultiBody(0.1, col_id, vis_id, [0, 0, -0.775], [0., 0., 0., 1.])
         table_id = self.p.loadURDF(
             os.path.join(DATAROOT, "table/table.urdf"),
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
