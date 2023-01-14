@@ -12,6 +12,7 @@ from bullet_envs.env.primitive_env import render, BasePrimitiveEnv
 import os
 import numpy as np
 from functools import partial
+from collections import deque
 import pybullet as p
 from pybullet_utils import bullet_client as bc
 import pkgutil
@@ -26,7 +27,8 @@ class PixelStack(ArmStack):
         self.privilege_dim = None
         self.feature_dim = feature_dim
         self.shift_params = shift_params
-        self.task_queue = []
+        self.task_queue = deque(maxlen=5000)
+        self.dist_threshold = 0.05
         # self.record_cfg = dict(
         #     save_video_path=os.path.join(os.path.dirname(__file__), "..", "tmp"),
         #     fps=10
@@ -52,10 +54,10 @@ class PixelStack(ArmStack):
             # sample goal
             self.goal_dict = self._sample_goal()
             self.goal = self.goal_dict["under_specify_state"]
-            self.n_step = 0
         else:
             task_array = self.task_queue[np.random.randint(len(self.task_queue))]
             self.set_task(task_array)
+        self.n_step = 0
         # self.robot.render_fn = partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128, 
         #             shift_params=self.shift_params)
         # self.robot.goal_img = self.goal_dict["img"].transpose((1, 2, 0)) if self.goal_dict["img"] is not None else None
@@ -91,8 +93,29 @@ class PixelStack(ArmStack):
 
     def set_task(self, task_array):
         # TODO: set initial state in env, set self.goal_dict for goal
-        pass
+        privilege_info = np.reshape(task_array[7: -self.feature_dim], (2, -1))
+        goal_feature = task_array[-self.feature_dim:]
+        init_state, goal_state = privilege_info[0], privilege_info[1]
+        init_state = np.reshape(init_state, (self.n_object, 7))
+        for i in range(self.n_object):
+            self.p.resetBasePositionAndOrientation(self.blocks_id[i], init_state[i][:3], init_state[i][3:])
+        # Set from agent generated task
+        self.goal_dict["full_state"] = goal_state
+        # dummy, since image feature will be set separately
+        self.goal_dict["img"] = np.zeros((3, 128, 128), dtype=np.uint8)
+        self.goal_dict["feature"] = goal_feature
+        self.goal_dict["source"] = np.array([1])
+        # TODO: seems still wrong
+        # Take care of self.goal since it will be used to compute reward and success
+        reshape_goal_state = goal_state.reshape(self.n_object, 7)
+        goal_quat = reshape_goal_state[:, 3:]
+        goal_euler = np.array([self.p.getEulerFromQuaternion(goal_quat[i]) for i in range(self.n_object)])
+        self.goal = np.concatenate(
+            [goal_euler, reshape_goal_state[:, :3], np.eye(self.n_object)], axis=-1)
 
+    def add_tasks(self, task_arrays):
+        self.task_queue.extend(task_arrays)
+    
     def _sample_goal(self):
         # We need old sample_goal just to make sure demo collection can run
         # In other cases, we don't need it
@@ -105,6 +128,33 @@ class PixelStack(ArmStack):
         if not hasattr(self, "goal_dict"):
             self.goal_dict = goal_dict
         return goal_dict
+    
+    def compute_reward_and_info(self):
+        if self.goal_dict["source"][0] == 0:
+            return super(PixelStack, self).compute_reward_and_info()
+        # rewrite
+        state_and_goal = self._get_privilege_info().reshape(2, -1)
+        cur_state = state_and_goal[0].reshape(self.n_object, -1)
+        goal = state_and_goal[1].reshape(self.n_object, -1)
+        com_cond = np.all(np.linalg.norm(
+            cur_state[:, :3] - goal[:, :3], axis=-1) < self.dist_threshold
+        )
+        cur_x_vec = [quat_apply(cur_state[i, 3:], np.array([1., 0., 0.])) for i in range(self.n_object)]
+        goal_x_vec = [quat_apply(goal[i, 3:], np.array([1., 0., 0.])) for i in range(self.n_object)]
+        rot_cond = np.all([np.abs(np.dot(cur_x_vec[i], goal_x_vec[i])) > 0.75 for i in range(self.n_object)])
+        is_success = com_cond and rot_cond
+        if self.reward_type == "sparse":
+            reward = float(is_success)
+        info = {"is_success": is_success}
+        return reward, info
+
+def quat_apply(a, b):
+    shape = b.shape
+    a = a.reshape((4,))
+    b = b.reshape((3,))
+    xyz = a[:3]
+    t = np.cross(xyz, b) * 2
+    return b + a[3:] * t + np.cross(xyz, t)
 
 
 if __name__ == "__main__":

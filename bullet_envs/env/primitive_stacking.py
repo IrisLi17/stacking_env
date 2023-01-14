@@ -472,7 +472,7 @@ class ArmGoalEnv(gym.Env):
                     # self.frame_count += 1
                 # judge whether stable
                 cur_pos = self._get_achieved_goal()[0]
-                for _ in range(10):
+                for _ in range(0):
                     # img = self.render(mode="rgb_array")
                     # ax.cla()
                     # ax.imshow(img)
@@ -485,13 +485,13 @@ class ArmGoalEnv(gym.Env):
                 #plt.imsave("tmp_roll/tmp%d.png" % self.frame_count, img)
                 #self.frame_count += 1
                 # print(self.frame_count)
-                future_pos = self._get_achieved_goal()[0]
+                # future_pos = self._get_achieved_goal()[0]
                 obs = self._get_obs()
                 reward, info = self.compute_reward_and_info()
                 done = False
-                if any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3):
-                    reward -= 0.001
-                    # self.p.removeState(state_id)
+                # if any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3):
+                #     reward -= 0.001
+                #     # self.p.removeState(state_id)
                 return obs, reward, done, info
 
         # action = np.clip(action, -1, 1)
@@ -1824,12 +1824,12 @@ class ArmStack(ArmPickAndPlace):
             n_goal = cur_pos.shape[0]
         goal_distance = np.linalg.norm(goal_pos - cur_pos, axis=1)
 
-        eef_distance = []
+        # eef_distance = []
         is_stable = False
-        eef_threshold = []
-        for i in range(n_goal):
-            eef_distance.append(np.linalg.norm(self.robot.get_eef_position() - goal_pos[i, :]))
-            eef_threshold.append(0.1 * (1 - self.cl_ratio) if self.n_to_stack[i] == 1 else 0.1)
+        # eef_threshold = []
+        # for i in range(n_goal):
+        #     eef_distance.append(np.linalg.norm(self.robot.get_eef_position() - goal_pos[i, :]))
+        #     eef_threshold.append(0.1 * (1 - self.cl_ratio) if self.n_to_stack[i] == 1 else 0.1)
 
         if self.primitive:
             is_success = True
@@ -1848,11 +1848,11 @@ class ArmStack(ArmPickAndPlace):
             else:
                 is_success = False
 
-        if isinstance((eef_distance > eef_threshold), np.ndarray):
-            eef_indicator = all(eef_distance > eef_threshold)
-        else:
-            eef_indicator = (eef_distance > eef_threshold)
-        if is_success and eef_indicator:  # tighten the threshold from 0.3 to 0.015 for pyramid stacking
+        # if isinstance((eef_distance > eef_threshold), np.ndarray):
+        #     eef_indicator = all(eef_distance > eef_threshold)
+        # else:
+        #     eef_indicator = (eef_distance > eef_threshold)
+        if is_success:  # tighten the threshold from 0.3 to 0.015 for pyramid stacking
             state_id = self.p.saveState()
             for _ in range(10):
                 self.p.stepSimulation()
@@ -1865,6 +1865,7 @@ class ArmStack(ArmPickAndPlace):
         if self.reward_type == "sparse":
             reward = float(is_stable)  # receive reward only when all goals are stable
         elif self.reward_type == "dense":
+            raise NotImplementedError
             # TODO
             reward = self._previous_distance - (np.sum(goal_distance) - (np.sum(goal_distance) < 0.15) * np.sum(
                 eef_distance)) + float(is_stable)

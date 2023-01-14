@@ -69,6 +69,7 @@ def main():
                             all_demos["obs"].append(relabeled_obs.detach().cpu().numpy())
                             assert not torch.all(traj_cache[i]["action"][_s_idx] == -1)
                             all_demos["action"].append(traj_cache[i]["action"][_s_idx].cpu().numpy())
+                            all_tasks.append(torch.cat([_cur_robot, _cur_state, _goal_state, _goal_img]).detach().cpu().numpy())
                             total_timestep += 1
                             if total_timestep % 100 == 0:
                                 print(total_timestep)
@@ -79,8 +80,11 @@ def main():
     all_demos["action"] = np.stack(all_demos["action"], axis=0)
     # all_demos["terminate_obs"] = np.stack(all_demos["terminate_obs"], axis=0)
     # all_demos["boundary"] = np.array(all_demos["boundary"])
+    all_tasks = np.stack(all_tasks, axis=0)
     with open("warmup_dataset_stacking.pkl", "wb") as f:
         pickle.dump(all_demos, f)
+    with open("warmup_tasks.pkl", "wb") as f:
+        pickle.dump(all_tasks, f)
 
 
 if __name__ == "__main__":

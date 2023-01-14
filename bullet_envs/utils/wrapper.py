@@ -136,6 +136,7 @@ class MVPVecPyTorch(VecEnvWrapper):
         self.mvp_model = mvp.load("vitb-mae-egosoup")
         self.mvp_model.to(self.device)
         self.mvp_model.freeze()
+        # Norm should still be trainable, so I will not forward norm in this wrapper, and add a ln to policy
         self.image_transform = torchvision.transforms.Resize(224)
         self.im_mean = torch.Tensor([0.485, 0.456, 0.406]).reshape((1, 3, 1, 1)).to(self.device)
         self.im_std = torch.Tensor([0.229, 0.224, 0.225]).reshape((1, 3, 1, 1)).to(self.device)
@@ -154,19 +155,26 @@ class MVPVecPyTorch(VecEnvWrapper):
     def mvp_process_obs(self, obs):
         assert "img" in obs.keys() and "goal" in obs.keys()
         assert "robot_state" in obs.keys() and "privilege_info" in obs.keys()
+        is_batched = len(obs["robot_state"].shape) > 1
+        if not is_batched:
+            for key in obs:
+                if isinstance(obs[key], torch.Tensor):
+                    obs[key] = torch.unsqueeze(obs[key], dim=0)
+                else:
+                    obs[key] = np.expand_dims(obs[key], axis=0)
         # sometimes, we don't have goal images. The correct feature should be set in "mvp_goal_feature"
         precomputed_goal_feat_mask = obs["goal_source"].astype(np.bool).squeeze(axis=-1)
         normed_img, normed_goal = self._normalize_obs(obs)
         with torch.no_grad():
             scene_feat = self.mvp_model.extract_feat(normed_img.float())
-            scene_feat = self.mvp_model.forward_norm(scene_feat)
+            # scene_feat = self.mvp_model.forward_norm(scene_feat)
         if np.all(precomputed_goal_feat_mask):
             # No need to forward mvp model, so I write it separately
             goal_feat = torch.from_numpy(obs["goal_feature"]).float().to(self.device)
         else:
             with torch.no_grad():
                 goal_feat = self.mvp_model.extract_feat(normed_goal.float())
-                goal_feat = self.mvp_model.forward_norm(goal_feat)
+                # goal_feat = self.mvp_model.forward_norm(goal_feat)
                 goal_feat[precomputed_goal_feat_mask] = torch.from_numpy(
                     obs["goal_feature"][precomputed_goal_feat_mask]).float().to(self.device)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
@@ -178,6 +186,8 @@ class MVPVecPyTorch(VecEnvWrapper):
             self.robot_state_dim = robot_state.shape[-1]
         if self.privilege_info_dim is None:
             self.privilege_info_dim = privilege_info.shape[-1]
+        if not is_batched:
+            obs = torch.squeeze(obs, dim=0)
         return obs
     
     def reset(self):
@@ -197,20 +207,16 @@ class MVPVecPyTorch(VecEnvWrapper):
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         for _info in info:
             if "terminal_observation" in _info:
-                normed_img, normed_goal = self._normalize_obs(_info["terminal_observation"])
-                with torch.no_grad():
-                    scene_feat = self.mvp_model.forward_norm(self.mvp_model.extract_feat(normed_img.float())).squeeze(dim=0)
-                    goal_feat = self.mvp_model.forward_norm(self.mvp_model.extract_feat(normed_goal.float())).squeeze(dim=0)
-                robot_state = torch.from_numpy(_info["terminal_observation"]["robot_state"]).float().to(self.device)
-                privilege_info = torch.from_numpy(_info["terminal_observation"]["privilege_info"]).float().to(self.device)
-                _info["terminal_observation"] = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
+                _info["terminal_observation"] = self.mvp_process_obs(_info["terminal_observation"])
         return obs, reward, done, info
 
     def get_state_from_obs(self, obs):
         robot_state = obs[..., self.mvp_feat_dim: self.mvp_feat_dim + self.robot_state_dim]
         goal_feat = obs[..., self.mvp_feat_dim + self.robot_state_dim: 2 * self.mvp_feat_dim + self.robot_state_dim]
         privilege_info = obs[..., 2 * self.mvp_feat_dim + self.robot_state_dim: 2 * self.mvp_feat_dim + self.robot_state_dim + self.privilege_info_dim]
-        return torch.cat([robot_state, privilege_info, goal_feat], dim=-1)
+        if isinstance(obs, torch.Tensor):
+            return torch.cat([robot_state, privilege_info, goal_feat], dim=-1)
+        return np.concatenate([robot_state, privilege_info, goal_feat], axis=-1)
     
     def get_obs(self, indices=None):
         obs = self.venv.get_obs(indices)
