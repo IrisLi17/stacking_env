@@ -27,7 +27,7 @@ class PixelStack(ArmStack):
         self.privilege_dim = None
         self.feature_dim = feature_dim
         self.shift_params = shift_params
-        self.task_queue = deque(maxlen=5000)
+        self.task_queue = deque(maxlen=1500)
         self.dist_threshold = 0.05
         # self.record_cfg = dict(
         #     save_video_path=os.path.join(os.path.dirname(__file__), "..", "tmp"),
@@ -147,7 +147,20 @@ class PixelStack(ArmStack):
             reward = float(is_success)
         info = {"is_success": is_success}
         return reward, info
-
+    
+    def oracle_feasible(self, obs: np.ndarray):
+        privilege_info = obs[..., -2 * self.n_object * 7:].reshape((-1, 2, self.n_object, 7))
+        achieved_state = privilege_info[:, 0]
+        goal_state = privilege_info[:, 1]
+        pos_cond = np.linalg.norm(achieved_state[:, :, :3] - goal_state[:, :, :3], axis=-1) < self.dist_threshold
+        achieved_x_vec = quat_apply_batch(achieved_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
+        goal_x_vec = quat_apply_batch(goal_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
+        rot_cond = np.abs(np.sum(achieved_x_vec * goal_x_vec, axis=-1)) > 0.75
+        match_count = np.sum(np.logical_and(pos_cond, rot_cond), axis=-1)
+        is_feasible = (match_count == self.n_object - 1)
+        assert is_feasible.shape == (obs.shape[0],)
+        return is_feasible
+    
 def quat_apply(a, b):
     shape = b.shape
     a = a.reshape((4,))
@@ -155,6 +168,26 @@ def quat_apply(a, b):
     xyz = a[:3]
     t = np.cross(xyz, b) * 2
     return b + a[3:] * t + np.cross(xyz, t)
+
+def quat_apply_batch(a, b):
+    xyz = a[..., :3]
+    t = np.cross(xyz, b) * 2
+    return b + a[..., 3:] * t + np.cross(xyz, t)
+
+# def test():
+#     alpha = np.random.uniform(-np.pi, np.pi, size=(10,))
+#     beta = np.random.uniform(-np.pi, np.pi, size=(10,))
+#     theta = np.random.uniform(-np.pi, np.pi, size=(10,))
+#     q = np.concatenate([np.expand_dims(np.sin(theta / 2), axis=-1) * np.stack(
+#         [np.sin(alpha) * np.sin(beta), np.sin(alpha) * np.cos(beta), np.cos(alpha)], axis=-1), 
+#         np.expand_dims(np.cos(theta / 2), axis=-1)], axis=-1)
+#     v = np.random.uniform(-2, 2, size=(10, 3))
+#     res1 = quat_apply_batch(q, v)
+#     res2 = []
+#     for i in range(q.shape[0]):
+#         res2.append(quat_apply(q[i], v[i]))
+#     res2 = np.array(res2)
+#     assert np.linalg.norm(res1 - res2) < 1e-3
 
 
 if __name__ == "__main__":
