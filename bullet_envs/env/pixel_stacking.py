@@ -161,6 +161,24 @@ class PixelStack(ArmStack):
         assert is_feasible.shape == (obs.shape[0],)
         return is_feasible
     
+    def render(self, mode="rgb_array"):
+        return render(
+            self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode,
+            shift_params=self.shift_params, pitch=-45, distance=0.6,
+            camera_target_position=(0.5, 0.0, 0.1)
+        )
+    
+    def get_goal_image(self):
+        # Only used for debugging purpose
+        cur_bullet_state = self.p.saveState()
+        goal_state = self.goal_dict["full_state"].reshape((self.n_object, 7))
+        for i in range(self.n_object):
+            self.p.resetBasePositionAndOrientation(self.blocks_id[i], goal_state[i][:3], goal_state[i][3:])
+        goal_img = self.render()
+        self.p.restoreState(cur_bullet_state)
+        self.p.removeState(cur_bullet_state)
+        return goal_img
+    
 def quat_apply(a, b):
     shape = b.shape
     a = a.reshape((4,))
