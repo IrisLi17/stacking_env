@@ -223,6 +223,17 @@ class MVPVecPyTorch(VecEnvWrapper):
         obs = self.mvp_process_obs(obs)
         return obs
 
+    def oracle_feasible(self, obs):
+        n_tasks_per_env = obs.shape[0] // self.venv.num_envs
+        if (obs.shape[0] % self.venv.num_envs) != 0:
+            n_tasks_per_env += 1
+        res = self.env.dispatch_env_method(
+            "oracle_feasible", 
+            *[obs[i * n_tasks_per_env: (i + 1) * n_tasks_per_env] for i in range(self.venv.num_envs)]
+        )
+        res = np.concatenate(res, axis=0)
+        return res
+
 class VecPyTorch(VecEnvWrapper):
     def __init__(self, venv, device):
         """Return only every `skip`-th frame"""

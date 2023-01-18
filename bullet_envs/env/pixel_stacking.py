@@ -27,7 +27,7 @@ class PixelStack(ArmStack):
         self.privilege_dim = None
         self.feature_dim = feature_dim
         self.shift_params = shift_params
-        self.task_queue = deque(maxlen=1500)
+        self.task_queue = deque(maxlen=3000)
         self.dist_threshold = 0.05
         # self.record_cfg = dict(
         #     save_video_path=os.path.join(os.path.dirname(__file__), "..", "tmp"),
@@ -157,6 +157,8 @@ class PixelStack(ArmStack):
         goal_x_vec = quat_apply_batch(goal_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
         rot_cond = np.abs(np.sum(achieved_x_vec * goal_x_vec, axis=-1)) > 0.75
         match_count = np.sum(np.logical_and(pos_cond, rot_cond), axis=-1)
+        n_to_move = self.n_object - match_count
+        return n_to_move
         is_feasible = (match_count == self.n_object - 1)
         assert is_feasible.shape == (obs.shape[0],)
         return is_feasible

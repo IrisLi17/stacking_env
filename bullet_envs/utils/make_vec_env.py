@@ -13,10 +13,11 @@ def make_env(env_id, rank, log_dir=None, info_keywords=("is_success",), kwargs={
         env = Monitor(env, os.path.join(log_dir, "%d.monitor.csv" % rank), info_keywords=info_keywords)
     return env
 
-def make_vec_env(env_id, num_workers, device, **kwargs):
+def make_vec_env(env_id, num_workers, device, reset_when_done=True, **kwargs):
     def make_env_thunk(i):
         return lambda: make_env(env_id, i, **kwargs)
-    venv = SubprocVecEnv([make_env_thunk(i) for i in range(num_workers)])
+    venv = SubprocVecEnv([make_env_thunk(i) for i in range(num_workers)], 
+                          reset_when_done=reset_when_done)
     if env_id == "BulletDrawerState-v1":
         mvp_venv = VecPyTorch(venv, device)
     else:
