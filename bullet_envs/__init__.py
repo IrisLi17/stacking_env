@@ -2,6 +2,8 @@ import gym
 from bullet_envs.env.robot_arm_env import ArmStack, ArmPickAndPlace
 from bullet_envs.env.primitive_env import DrawerObjEnv, DrawerObjEnvState
 from bullet_envs.env.pixel_stacking import PixelStack
+from bullet_envs.env.primitive_stacking import ArmStack as StateStack
+import numpy as np
 
 
 gym.register(
@@ -29,4 +31,12 @@ gym.register(
 
 gym.register(
     "BulletPixelStack-v1", entry_point=PixelStack, max_episode_steps=20,
+)
+
+gym.register(
+    "BulletStack-v2", entry_point=StateStack, max_episode_steps=None,
+    kwargs=dict(
+        n_object=6, reward_type="sparse", action_dim=7, generate_data=True, primitive=True,
+        n_to_stack=np.array([[1, 2, 3]]), name="allow_rotation"
+    ),
 )

@@ -586,7 +586,7 @@ class ArmGoalEnv(gym.Env):
         pass
 
     def _get_obs(self):
-        obs = self.robot.get_obs()  # robot_obs? TODO: check shape
+        obs = self.robot.get_obs_old()  # robot_obs? TODO: check shape
         return dict(observation=obs, achieved_goal=self.goal.copy(), desired_goal=self.goal.copy())
 
     def get_obs(self):
@@ -839,7 +839,7 @@ class ArmPickAndPlace(ArmGoalEnv):
 
     def _get_obs(self):
         # changed
-        obs = self.robot.get_obs()  # robot_obs
+        obs = self.robot.get_obs_old()  # robot_obs
         # print("robot_obs:", obs)
         eef_pos = obs[:3]
         if self.robot_dim is None:
@@ -1243,7 +1243,7 @@ class ArmStack(ArmPickAndPlace):
 
         self.expand_traj = None  # if use saved expand traj, the current goal and simulated objects
         if self.use_expand_goal_prob > 0:
-            with open("primitive_cuboid_expand1.pkl", "rb") as f:  # collect_data_last_step
+            with open("primitive_cuboid_expand4.pkl", "rb") as f:  # collect_data_last_step
                 data = pickle.load(f)
                 self.offline_datasets = data["expansion"]  # 4300 data in form of obs, actions, rewards
                 # self.classified_data = self.gen_data_classify(data)

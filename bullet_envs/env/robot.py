@@ -244,6 +244,17 @@ class PandaRobot(object):
         eef_euler = self.get_eef_orn(as_type="euler")
         return np.concatenate([[scaled_finger_width], eef_pos, eef_euler])
 
+    def get_obs_old(self):
+        eef_state = self.p.getLinkState(self.id, self.eef_index, computeLinkVelocity=1, computeForwardKinematics=1)
+        eef_pos, eef_orn, _, _, _, _, eef_vl, eef_va = eef_state
+        eef_orn = quat_diff(eef_orn, np.array([1, 0, 0, 0]))
+        eef_euler = self.p.getEulerFromQuaternion(eef_orn)
+        eef_pos, eef_euler, eef_vl, eef_va = map(np.asarray, [eef_pos, eef_euler, eef_vl, eef_va])
+        finger_position, finger_vel, *_ = self.p.getJointState(self.id, self.finger_drive_index)
+        eef_vl *= 1. / 240 * self.num_substeps
+        finger_vel *= 1. / 240 * self.num_substeps
+        return np.concatenate([eef_pos, eef_euler, eef_vl, [finger_position, finger_vel]])
+    
     def get_eef_position(self):
         eef_pos, *_ = self.p.getLinkState(self.id, self.eef_index)
         return np.array(eef_pos)
