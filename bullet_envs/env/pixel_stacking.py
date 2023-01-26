@@ -55,13 +55,16 @@ class PixelStack(ArmStack):
             self.goal_dict = self._sample_goal()
             self.goal = self.goal_dict["under_specify_state"]
         else:
-            task_array = self.task_queue[np.random.randint(len(self.task_queue))]
+            idx = np.random.randint(len(self.task_queue))
+            task_array = self.task_queue[idx]
             self.set_task(task_array)
         self.n_step = 0
         # self.robot.render_fn = partial(render, robot=self.robot, view_mode=self.view_mode, width=128, height=128, 
         #             shift_params=self.shift_params)
         # self.robot.goal_img = self.goal_dict["img"].transpose((1, 2, 0)) if self.goal_dict["img"] is not None else None
         obs = self._get_obs()
+        if len(self.task_queue) > 0:
+            assert np.linalg.norm(obs["privilege_info"] - task_array[7: -self.feature_dim]) < 1e-3, (obs["privilege_info"], task_array[7: -self.feature_dim])
         return obs
     
     def _get_obs(self):
@@ -86,6 +89,9 @@ class PixelStack(ArmStack):
         cur_object_poses = []
         for i in range(self.n_object):
             pos, quat = self.p.getBasePositionAndOrientation(self.blocks_id[i])
+            pos, quat = map(np.array, [pos, quat])
+            if quat[-1] < 0:
+                quat = -quat
             cur_object_poses.append(np.concatenate([pos, quat]))
         cur_object_poses = np.concatenate(cur_object_poses)
         goal_poses = self.goal_dict["full_state"]

@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import shutil
 import math
 from collections import OrderedDict
+import pkgutil
+egl = pkgutil.get_loader('eglRenderer')
 
 DATAROOT = pybullet_data.getDataPath()
 COLOR = [[1.0, 0, 0], [1, 1, 0], [0.2, 0.8, 0.8], [0.8, 0.2, 0.8], [0, 0, 0], [0.0, 0.0, 1.0], [0.5, 0.2, 0.0],
@@ -51,22 +53,24 @@ class ArmGoalEnv(gym.Env):
 
     def _create_simulation(self):
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
+        plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
+        print("plugin=", plugin)
+        self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
+        self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
     
     def _setup_env(self, robot, init_qpos=None, base_position=(0, 0, 0)):
         self._create_simulation()
         self.p.resetSimulation()
         self.p.setTimeStep(self.dt)
         self.p.setGravity(0., 0., -9.8)
-        self.p.resetDebugVisualizerCamera(1.0, 40, -20, [0, 0, 0, ])
-        plane_id = self.p.loadURDF(os.path.join(os.path.dirname(__file__), "assets/plane.urdf"), [0, 0, -0.795])
-        # get a doormat
-        vis_id = self.p.createVisualShape(self.p.GEOM_BOX, halfExtents=[5, 5, 0.02], rgbaColor=[1, 1, 1, 1])
-        col_id = self.p.createCollisionShape(self.p.GEOM_BOX, halfExtents=[5, 5, 0.02])
-        self.p.createMultiBody(0.1, col_id, vis_id, [0, 0, -0.775], [0., 0., 0., 1.])
+        # self.p.resetDebugVisualizerCamera(1.0, 40, -20, [0, 0, 0, ])
+        self.plane_id = self.p.loadURDF(os.path.join(os.path.dirname(__file__), "assets/plane.urdf"), [0, 0, -0.795])
         table_id = self.p.loadURDF(
             os.path.join(DATAROOT, "table/table.urdf"),
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
         )
+        for shape in self.p.getVisualShapeData(self.plane_id):
+            self.p.changeVisualShape(self.plane_id, shape[1], rgbaColor=(1, 1, 1, 1))
         if robot == "xarm":
             from bullet_envs.env.robot import XArmRobot
             self.robot = XArmRobot(self.p, init_qpos, base_position)
@@ -517,6 +521,11 @@ class ArmGoalEnv(gym.Env):
         return obs, reward, done, info
 
     def render(self, mode="rgb_array", width=500, height=500):
+        from bullet_envs.env.primitive_env import render
+        scene = render(self.p, width=128, height=128, robot=self.robot, view_mode="third",
+                       pitch=-45, distance=0.6,
+                       camera_target_position=(0.5, 0.0, 0.1)).transpose((2, 0, 1))[:3]
+        return scene
         if mode == 'rgb_array':
             view_matrix = self.p.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=(0.3, 0, 0.2),
@@ -645,6 +654,9 @@ class ArmPickAndPlace(ArmGoalEnv):
                         self.p, [0.025, 0.025, 0.025], [10, 0, 1 + 0.5 * i], [0, 0, 0, 1], 0.1, COLOR[i % len(COLOR)]
                     )
                 )
+        # Make the robot invisible
+        for shape in self.p.getVisualShapeData(self.robot.id):
+            self.p.changeVisualShape(self.robot.id, shape[1], rgbaColor=(0, 0, 0, 0))
 
     def reset(self):
         obs_dict = super().reset()
@@ -1211,7 +1223,8 @@ class ArmStack(ArmPickAndPlace):
             self.n_object = 6
             self.n_max_goal = 3
             self.change_height_prob = 0  # whether use rectangle
-            self.use_expand_goal_prob = 0  # for rl tuning, use saved expand trajectory as goal or not
+            # self.use_expand_goal_prob = 1  # for rl tuning, use saved expand trajectory as goal or not
+            self.use_expand_goal_prob = 0
             self.put_goal_aside_prob = 0  # use pyramid expansion or not
             self.multi_step_goal_prob = 0
             self.multi_goal_prob = 0
@@ -1243,7 +1256,7 @@ class ArmStack(ArmPickAndPlace):
 
         self.expand_traj = None  # if use saved expand traj, the current goal and simulated objects
         if self.use_expand_goal_prob > 0:
-            with open("primitive_cuboid_expand4.pkl", "rb") as f:  # collect_data_last_step
+            with open("primitive_cuboid_expand5.pkl", "rb") as f:  # collect_data_last_step
                 data = pickle.load(f)
                 self.offline_datasets = data["expansion"]  # 4300 data in form of obs, actions, rewards
                 # self.classified_data = self.gen_data_classify(data)
@@ -1364,6 +1377,7 @@ class ArmStack(ArmPickAndPlace):
             traj_idx = int(random.sample(range(len(self.offline_datasets)), 1)[0])
             self.traj_idx = traj_idx
             self.expand_traj = self.offline_datasets[traj_idx]["obs"][0]
+            print("traj idx", self.traj_idx)
             for n in range(self.n_object):
                 self.p.resetBasePositionAndOrientation(
                     self.blocks_id[n], self.expand_traj[11 + 16 * n: 14 + 16 * n],
@@ -1696,6 +1710,11 @@ class ArmStack(ArmPickAndPlace):
 
         return goal
 
+    def visualize_goal(self, goal, token_type=True):
+        if self.body_goal is not None:
+            for goal_id in self.body_goal:
+                self.p.removeBody(goal_id)
+        
     def set_choice_prob(self, n_to_stack, prob):
         # called in pair
         # n_to_stack shape: [n_max_goal, 1], prob shape: [n_max_goal, 1]
@@ -1873,10 +1892,11 @@ class ArmStack(ArmPickAndPlace):
         else:
             raise NotImplementedError
         is_success = is_stable
+        img = self.render()
         info = {'is_success': is_success, "n_to_stack": self.n_to_stack, "n_base": self.n_base,
                 'put_goal_aside': self.put_goal_aside, 'use_expand_goal': self.use_expand_goal,
                 'stack_straight': self.stack_straight, 'inside_pyramid': self.inside_pyramid,
-                'multi_goal': self.multi_goal, 'multi_step_goal': self.multi_step_goal}
+                'multi_goal': self.multi_goal, 'multi_step_goal': self.multi_step_goal, "img": img.astype(np.uint8)}
         return reward, info
 
     def compute_reward(self, obs, goal):
@@ -1885,6 +1905,62 @@ class ArmStack(ArmPickAndPlace):
 
     def set_cl_ratio(self, cl_ratio):
         self.cl_ratio = cl_ratio
+    
+    def create_generalize_task(self):
+        robot_obs = self.robot.get_obs()
+        all_position = np.array([
+            [self.np_random.uniform(*self.robot.x_workspace),
+            self.np_random.uniform(*self.robot.y_workspace),
+            self.robot.base_pos[2] + self.np_random.uniform(0.025, 0.075)]
+            for _ in range(self.n_object)])
+        for i in range(self.n_object):
+            self.p.resetBasePositionAndOrientation(
+                self.blocks_id[i], all_position[i], self.gen_obj_quat()
+            )
+        for _ in range(50):
+            self.p.stepSimulation()
+        init_state = []
+        for i in range(self.n_object):
+            obj_pos, obj_quat = self.p.getBasePositionAndOrientation(self.blocks_id[i])
+            obj_quat = np.array(obj_quat)
+            if obj_quat[-1] < 0:
+                obj_quat = -obj_quat
+            init_state.append(np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+        init_state = np.concatenate(init_state)
+        # goal
+        offset = np.array([np.mean(self.robot.x_workspace) + 0.1, np.mean(self.robot.y_workspace), 0.])
+        goal_poses = [
+            (np.array([0.05 / np.sqrt(3), 0.05, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))), 
+            (np.array([0.05 / np.sqrt(3), -0.05, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))),
+            (np.array([-0.1 / np.sqrt(3), 0.0, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+            (np.array([0.05 / np.sqrt(3), 0.05, 0.175]) + offset, np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
+            (np.array([0.05 / np.sqrt(3), -0.05, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
+            (np.array([-0.1 / np.sqrt(3), 0.0, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]))
+        ]
+        # goal_poses = [
+        #     (np.array([0.0, -0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+        #     (np.array([0.0, -0.12, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+        #     (np.array([0.0, -0.04, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+        #     (np.array([0.0, 0.04, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+        #     (np.array([0.0, 0.12, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+        #     (np.array([0.0, 0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+        # ]
+        obj_idxs = np.arange(self.n_object)
+        np.random.shuffle(obj_idxs)
+        for i in range(self.n_object):
+            self.p.resetBasePositionAndOrientation(self.blocks_id[obj_idxs[i]], goal_poses[i][0], goal_poses[i][1])
+        goal_state = []
+        for i in range(self.n_object):
+            obj_pos, obj_quat = self.p.getBasePositionAndOrientation(self.blocks_id[i])
+            obj_quat = np.array(obj_quat)
+            if obj_quat[-1] < 0:
+                obj_quat = -obj_quat
+            goal_state.append(np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+        goal_state = np.concatenate(goal_state)
+        goal_image = self.render()
+        # plt.imsave("tmp/tmp0.png", goal_image.transpose((1, 2, 0)))
+        # exit()
+        return robot_obs, init_state, goal_state, goal_image
 
 
 def _create_block(physics_client, halfExtents, pos, orn, mass=0.2, rgba=None, vel=None, vela=None):
