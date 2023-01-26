@@ -155,16 +155,7 @@ class PixelStack(ArmStack):
         return reward, info
     
     def oracle_feasible(self, obs: np.ndarray):
-        privilege_info = obs[..., -2 * self.n_object * 7:].reshape((-1, 2, self.n_object, 7))
-        achieved_state = privilege_info[:, 0]
-        goal_state = privilege_info[:, 1]
-        pos_cond = np.linalg.norm(achieved_state[:, :, :3] - goal_state[:, :, :3], axis=-1) < self.dist_threshold
-        achieved_x_vec = quat_apply_batch(achieved_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
-        goal_x_vec = quat_apply_batch(goal_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
-        rot_cond = np.abs(np.sum(achieved_x_vec * goal_x_vec, axis=-1)) > 0.75
-        match_count = np.sum(np.logical_and(pos_cond, rot_cond), axis=-1)
-        n_to_move = self.n_object - match_count
-        return n_to_move
+        return get_n_to_move(obs, self.n_object, self.dist_threshold, 0.75)
         is_feasible = (match_count == self.n_object - 1)
         assert is_feasible.shape == (obs.shape[0],)
         return is_feasible
@@ -200,6 +191,17 @@ def quat_apply_batch(a, b):
     t = np.cross(xyz, b) * 2
     return b + a[..., 3:] * t + np.cross(xyz, t)
 
+def get_n_to_move(obs, n_object, dist_threshold, rot_threshold):
+    privilege_info = obs[..., -2 * n_object * 7:].reshape((-1, 2, n_object, 7))
+    achieved_state = privilege_info[:, 0]
+    goal_state = privilege_info[:, 1]
+    pos_cond = np.linalg.norm(achieved_state[:, :, :3] - goal_state[:, :, :3], axis=-1) < dist_threshold
+    achieved_x_vec = quat_apply_batch(achieved_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
+    goal_x_vec = quat_apply_batch(goal_state[:, :, 3:], np.array([1., 0., 0.]).reshape((1, 1, 3)))
+    rot_cond = np.abs(np.sum(achieved_x_vec * goal_x_vec, axis=-1)) > rot_threshold
+    match_count = np.sum(np.logical_and(pos_cond, rot_cond), axis=-1)
+    n_to_move = n_object - match_count
+    return n_to_move
 # def test():
 #     alpha = np.random.uniform(-np.pi, np.pi, size=(10,))
 #     beta = np.random.uniform(-np.pi, np.pi, size=(10,))
