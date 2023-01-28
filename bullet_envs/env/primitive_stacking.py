@@ -476,7 +476,7 @@ class ArmGoalEnv(gym.Env):
                     # self.frame_count += 1
                 # judge whether stable
                 cur_pos = self._get_achieved_goal()[0]
-                for _ in range(0):
+                for _ in range(10):
                     # img = self.render(mode="rgb_array")
                     # ax.cla()
                     # ax.imshow(img)
