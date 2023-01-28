@@ -1212,7 +1212,7 @@ class ArmPickAndPlace(ArmGoalEnv):
 # changed, generalization: each alternation has several goals on the same level
 # n_max_goal
 class ArmStack(ArmPickAndPlace):
-    def __init__(self, *args, n_to_stack=[[1, 2, 3], [1, 2, 3]], name=None, generate_data=False, action_dim=4, **kwargs):
+    def __init__(self, *args, n_to_stack=[[1, 2, 3], [1, 2, 3]], name=None, generate_data=False, action_dim=4, use_expand_goal_prob=0, **kwargs):
         self.env_id = "BulletStack-v1"
         self.name = name
         self.generate_data = generate_data
@@ -1224,7 +1224,7 @@ class ArmStack(ArmPickAndPlace):
             self.n_max_goal = 3
             self.change_height_prob = 0  # whether use rectangle
             # self.use_expand_goal_prob = 1  # for rl tuning, use saved expand trajectory as goal or not
-            self.use_expand_goal_prob = 0
+            self.use_expand_goal_prob = use_expand_goal_prob
             self.put_goal_aside_prob = 0  # use pyramid expansion or not
             self.multi_step_goal_prob = 0
             self.multi_goal_prob = 0
@@ -1233,7 +1233,7 @@ class ArmStack(ArmPickAndPlace):
             self.n_object = 6
             self.n_max_goal = 3
             self.change_height_prob = 0  # whether use rectangle
-            self.use_expand_goal_prob = 0  # for rl tuning, use saved expand trajectory as goal or not
+            self.use_expand_goal_prob = use_expand_goal_prob  # for rl tuning, use saved expand trajectory as goal or not
             self.put_goal_aside_prob = 0  # use pyramid expansion or not
             self.pyramid_evaluation = False
         self.n_to_stack_choices = n_to_stack  # shape: [n_goal, choices]
