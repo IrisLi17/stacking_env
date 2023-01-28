@@ -85,6 +85,13 @@ class PixelStack(ArmStack):
             for goal_id in self.body_goal:
                 self.p.removeBody(goal_id)
     
+    def _get_achieved_goal(self):
+        cur_pos = []
+        for i in range(self.n_object):
+            pos, _ = self.p.getBasePositionAndOrientation(self.blocks_id[i])
+            cur_pos.append(np.array(pos))
+        return np.array(cur_pos), np.array(self.blocks_id)
+    
     def _get_privilege_info(self):
         cur_object_poses = []
         for i in range(self.n_object):
@@ -142,13 +149,35 @@ class PixelStack(ArmStack):
         state_and_goal = self._get_privilege_info().reshape(2, -1)
         cur_state = state_and_goal[0].reshape(self.n_object, -1)
         goal = state_and_goal[1].reshape(self.n_object, -1)
-        com_cond = np.all(np.linalg.norm(
-            cur_state[:, :3] - goal[:, :3], axis=-1) < self.dist_threshold
+        # com_cond = np.all(np.linalg.norm(
+        #     cur_state[:, :3] - goal[:, :3], axis=-1) < self.dist_threshold
+        # )
+        # cur_x_vec = [quat_apply(cur_state[i, 3:], np.array([1., 0., 0.])) for i in range(self.n_object)]
+        # goal_x_vec = [quat_apply(goal[i, 3:], np.array([1., 0., 0.])) for i in range(self.n_object)]
+        # rot_cond = np.all([np.abs(np.dot(cur_x_vec[i], goal_x_vec[i])) > 0.75 for i in range(self.n_object)])
+        # is_success = com_cond and rot_cond
+        # if self.reward_type == "sparse":
+        #     reward = float(is_success)
+        # info = {"is_success": is_success}
+
+        # TODO: revert to old one
+        diff_vec = goal[:, :3] - cur_state[:, :3]
+        local_diff_vec = np.array([(np.linalg.inv(
+            np.array(self.p.getMatrixFromQuaternion(cur_state[i, 3:])).reshape((3, 3))
+        ) @ diff_vec[i].reshape((3, 1))).squeeze() for i in range(self.n_object)])
+        halfextent = np.array(
+            [np.array(self.p.getCollisionShapeData(self.blocks_id[i], -1)[0][3]) / 2 for i in range(self.n_object)]
         )
-        cur_x_vec = [quat_apply(cur_state[i, 3:], np.array([1., 0., 0.])) for i in range(self.n_object)]
-        goal_x_vec = [quat_apply(goal[i, 3:], np.array([1., 0., 0.])) for i in range(self.n_object)]
-        rot_cond = np.all([np.abs(np.dot(cur_x_vec[i], goal_x_vec[i])) > 0.75 for i in range(self.n_object)])
-        is_success = com_cond and rot_cond
+        is_success = np.all(local_diff_vec < halfextent)
+        if is_success:
+            tmp_state = self.p.saveState()
+            for _ in range(10):
+                self.p.stepSimulation()
+            future_pose = self._get_privilege_info().reshape(2, self.n_object, -1)[0]
+            is_stable = np.all(np.linalg.norm(future_pose[:, :3] - cur_state[:, :3], axis=-1) < 1e-3)
+            is_success = is_stable
+            self.p.restoreState(stateId=tmp_state)
+            self.p.removeState(tmp_state)
         if self.reward_type == "sparse":
             reward = float(is_success)
         info = {"is_success": is_success}

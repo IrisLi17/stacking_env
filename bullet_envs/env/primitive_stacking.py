@@ -489,12 +489,12 @@ class ArmGoalEnv(gym.Env):
                 #plt.imsave("tmp_roll/tmp%d.png" % self.frame_count, img)
                 #self.frame_count += 1
                 # print(self.frame_count)
-                # future_pos = self._get_achieved_goal()[0]
+                future_pos = self._get_achieved_goal()[0]
                 obs = self._get_obs()
                 reward, info = self.compute_reward_and_info()
                 done = False
-                # if any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3):
-                #     reward -= 0.001
+                if any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3):
+                    reward -= 0.001
                 #     # self.p.removeState(state_id)
                 return obs, reward, done, info
 
