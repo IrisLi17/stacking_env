@@ -168,7 +168,7 @@ class PixelStack(ArmStack):
         halfextent = np.array(
             [np.array(self.p.getCollisionShapeData(self.blocks_id[i], -1)[0][3]) / 2 for i in range(self.n_object)]
         )
-        is_success = np.all(local_diff_vec < halfextent)
+        is_success = np.all(np.abs(local_diff_vec) < halfextent)
         if is_success:
             tmp_state = self.p.saveState()
             for _ in range(10):
