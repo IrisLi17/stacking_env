@@ -129,6 +129,9 @@ class PixelStack(ArmStack):
     def add_tasks(self, task_arrays):
         self.task_queue.extend(task_arrays)
     
+    def clear_tasks(self):
+        self.task_queue.clear()
+    
     def _sample_goal(self):
         # We need old sample_goal just to make sure demo collection can run
         # In other cases, we don't need it
@@ -206,6 +209,9 @@ class PixelStack(ArmStack):
         self.p.restoreState(cur_bullet_state)
         self.p.removeState(cur_bullet_state)
         return goal_img
+    
+    def set_dist_threshold(self, dist_threshold):
+        self.dist_threshold = dist_threshold
     
 def quat_apply(a, b):
     shape = b.shape
