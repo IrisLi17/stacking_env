@@ -1212,7 +1212,8 @@ class ArmPickAndPlace(ArmGoalEnv):
 # changed, generalization: each alternation has several goals on the same level
 # n_max_goal
 class ArmStack(ArmPickAndPlace):
-    def __init__(self, *args, n_to_stack=[[1, 2, 3], [1, 2, 3]], name=None, generate_data=False, action_dim=4, use_expand_goal_prob=0, **kwargs):
+    def __init__(self, *args, n_to_stack=[[1, 2, 3], [1, 2, 3]], name=None, generate_data=False, action_dim=4, 
+                 use_expand_goal_prob=0, expand_task_path=None, **kwargs):
         self.env_id = "BulletStack-v1"
         self.name = name
         self.generate_data = generate_data
@@ -1256,7 +1257,7 @@ class ArmStack(ArmPickAndPlace):
 
         self.expand_traj = None  # if use saved expand traj, the current goal and simulated objects
         if self.use_expand_goal_prob > 0:
-            with open("primitive_cuboid_expand5.pkl", "rb") as f:  # collect_data_last_step
+            with open(expand_task_path, "rb") as f:  # collect_data_last_step
                 data = pickle.load(f)
                 self.offline_datasets = data["expansion"]  # 4300 data in form of obs, actions, rewards
                 # self.classified_data = self.gen_data_classify(data)
@@ -1930,12 +1931,12 @@ class ArmStack(ArmPickAndPlace):
         # goal
         offset = np.array([np.mean(self.robot.x_workspace) + 0.1, np.mean(self.robot.y_workspace), 0.])
         goal_poses = [
-            (np.array([0.05 / np.sqrt(3), 0.05, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))), 
-            (np.array([0.05 / np.sqrt(3), -0.05, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))),
-            (np.array([-0.1 / np.sqrt(3), 0.0, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
-            (np.array([0.05 / np.sqrt(3), 0.05, 0.175]) + offset, np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
-            (np.array([0.05 / np.sqrt(3), -0.05, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
-            (np.array([-0.1 / np.sqrt(3), 0.0, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]))
+            (np.array([-0.05 / np.sqrt(3), 0.06 * 2, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))), 
+            (np.array([-0.05 / np.sqrt(3), -0.06 * 2, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))),
+            (np.array([0.1 / np.sqrt(3), 0.0, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+            (np.array([-0.05 / np.sqrt(3), 0.06 * 2, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
+            (np.array([-0.05 / np.sqrt(3), -0.06 * 2, 0.175]) + offset, np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
+            (np.array([0.1 / np.sqrt(3), 0.0, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]))
         ]
         # goal_poses = [
         #     (np.array([0.0, -0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
@@ -1947,7 +1948,7 @@ class ArmStack(ArmPickAndPlace):
         # ]
         obj_idxs = np.arange(self.n_object)
         np.random.shuffle(obj_idxs)
-        for i in range(self.n_object):
+        for i in range(len(goal_poses)):
             self.p.resetBasePositionAndOrientation(self.blocks_id[obj_idxs[i]], goal_poses[i][0], goal_poses[i][1])
         goal_state = []
         for i in range(self.n_object):
