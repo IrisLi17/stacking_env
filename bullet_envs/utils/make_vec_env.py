@@ -14,6 +14,10 @@ def make_env(env_id, rank, log_dir=None, info_keywords=("is_success",), kwargs={
     return env
 
 def make_vec_env(env_id, num_workers, device, reset_when_done=True, **kwargs):
+    if "use_patch_feat" in kwargs:
+        use_patch_feat = kwargs.pop("use_patch_feat")
+    else:
+        use_patch_feat = False
     def make_env_thunk(i):
         return lambda: make_env(env_id, i, **kwargs)
     venv = SubprocVecEnv([make_env_thunk(i) for i in range(num_workers)], 
@@ -21,5 +25,5 @@ def make_vec_env(env_id, num_workers, device, reset_when_done=True, **kwargs):
     if env_id == "BulletDrawerState-v1":
         mvp_venv = VecPyTorch(venv, device)
     else:
-        mvp_venv = MVPVecPyTorch(venv, device)
+        mvp_venv = MVPVecPyTorch(venv, device, use_patch_feat=use_patch_feat)
     return mvp_venv

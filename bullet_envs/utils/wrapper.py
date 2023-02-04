@@ -128,29 +128,22 @@ class FlexibleTimeLimitWrapper(gym.Wrapper):
 
 
 class MVPVecPyTorch(VecEnvWrapper):
-    def __init__(self, venv, device, observation_space=None, action_space=None, ):
+    def __init__(self, venv, device, observation_space=None, action_space=None, use_patch_feat=False):
         super().__init__(venv, observation_space, action_space)
         self.device = device
-        import mvp
-        import torchvision.transforms
-        self.mvp_model = mvp.load("vitb-mae-egosoup")
-        self.mvp_model.to(self.device)
-        self.mvp_model.freeze()
-        # Norm should still be trainable, so I will not forward norm in this wrapper, and add a ln to policy
-        self.image_transform = torchvision.transforms.Resize(224)
-        self.im_mean = torch.Tensor([0.485, 0.456, 0.406]).reshape((1, 3, 1, 1)).to(self.device)
-        self.im_std = torch.Tensor([0.229, 0.224, 0.225]).reshape((1, 3, 1, 1)).to(self.device)
+        from bullet_envs.utils.image_processor import ImageProcessor
+        self.image_processor = ImageProcessor(device, use_patch_feat)
         self.mvp_feat_dim = None
         self.robot_state_dim = None
         self.privilege_info_dim = None
         self.reset()
     
-    def _normalize_obs(self, obs):
-        img = self.image_transform(torch.from_numpy(obs["img"]).float().to(self.device))
-        goal = self.image_transform(torch.from_numpy(obs["goal"]).float().to(self.device))
-        normed_img = (img / 255.0 - self.im_mean) / self.im_std
-        normed_goal = (goal / 255.0 - self.im_mean) / self.im_std
-        return normed_img, normed_goal
+    # def _normalize_obs(self, obs):
+    #     img = self.image_transform(torch.from_numpy(obs["img"]).float().to(self.device))
+    #     goal = self.image_transform(torch.from_numpy(obs["goal"]).float().to(self.device))
+    #     normed_img = (img / 255.0 - self.im_mean) / self.im_std
+    #     normed_goal = (goal / 255.0 - self.im_mean) / self.im_std
+    #     return normed_img, normed_goal
 
     def mvp_process_obs(self, obs):
         assert "img" in obs.keys() and "goal" in obs.keys()
@@ -164,19 +157,11 @@ class MVPVecPyTorch(VecEnvWrapper):
                     obs[key] = np.expand_dims(obs[key], axis=0)
         # sometimes, we don't have goal images. The correct feature should be set in "mvp_goal_feature"
         precomputed_goal_feat_mask = obs["goal_source"].astype(np.bool).squeeze(axis=-1)
-        normed_img, normed_goal = self._normalize_obs(obs)
-        with torch.no_grad():
-            scene_feat = self.mvp_model.extract_feat(normed_img.float())
-            # scene_feat = self.mvp_model.forward_norm(scene_feat)
-        if np.all(precomputed_goal_feat_mask):
-            # No need to forward mvp model, so I write it separately
-            goal_feat = torch.from_numpy(obs["goal_feature"]).float().to(self.device)
-        else:
-            with torch.no_grad():
-                goal_feat = self.mvp_model.extract_feat(normed_goal.float())
-                # goal_feat = self.mvp_model.forward_norm(goal_feat)
-                goal_feat[precomputed_goal_feat_mask] = torch.from_numpy(
-                    obs["goal_feature"][precomputed_goal_feat_mask]).float().to(self.device)
+        scene_feat = self.image_processor.mvp_process_image(obs["img"])
+        goal_feat = self.image_processor.mvp_process_image(obs["goal"])
+        if not np.all(precomputed_goal_feat_mask):
+            goal_feat[precomputed_goal_feat_mask] = torch.from_numpy(
+                obs["goal_feature"][precomputed_goal_feat_mask]).float().to(self.device)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
         privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)
         obs = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
