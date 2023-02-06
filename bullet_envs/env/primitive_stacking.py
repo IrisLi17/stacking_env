@@ -23,8 +23,9 @@ FRAMECOUNT = 0
 
 
 class ArmGoalEnv(gym.Env):
-    def __init__(self, robot="panda", seed=None, action_dim=4, generate_data=None):
+    def __init__(self, robot="panda", seed=None, action_dim=4, generate_data=None, use_gpu_render=True):
         self.seed(seed)
+        self.use_gpu_render = use_gpu_render
 
         self._setup_env(robot)
         self.goal = self._sample_goal()
@@ -53,10 +54,11 @@ class ArmGoalEnv(gym.Env):
 
     def _create_simulation(self):
         self.p = bc.BulletClient(connection_mode=p.DIRECT)
-        plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
-        print("plugin=", plugin)
-        self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
-        self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
+        if self.use_gpu_render:
+            plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
+            print("plugin=", plugin)
+            self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
+            self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
     
     def _setup_env(self, robot, init_qpos=None, base_position=(0, 0, 0)):
         self._create_simulation()
@@ -65,7 +67,7 @@ class ArmGoalEnv(gym.Env):
         self.p.setGravity(0., 0., -9.8)
         # self.p.resetDebugVisualizerCamera(1.0, 40, -20, [0, 0, 0, ])
         self.plane_id = self.p.loadURDF(os.path.join(os.path.dirname(__file__), "assets/plane.urdf"), [0, 0, -0.795])
-        table_id = self.p.loadURDF(
+        self.table_id = self.p.loadURDF(
             os.path.join(DATAROOT, "table/table.urdf"),
             [0.40000, 0.00000, -.625000], [0.000000, 0.000000, 0.707, 0.707]
         )
@@ -402,16 +404,6 @@ class ArmGoalEnv(gym.Env):
             raise NotImplementedError
 
     def step(self, action):
-        # very instantaneous, for visualizing expansion data
-        if False:
-            if len(self.offline_datasets[self.traj_idx]["obs"]) <= self.n_step:
-                obs = self._get_obs()
-                reward, info = self.compute_reward_and_info()
-                done = False
-                return obs, reward, done, info
-            action = self.offline_datasets[self.traj_idx]["actions"][self.n_step]
-            self.n_step += 1
-        
         assert self.name is not None
         if (action == -1).all():
             obs = self._get_obs()
@@ -426,34 +418,27 @@ class ArmGoalEnv(gym.Env):
                 raise ValueError
             # get target position & orientation
             # todo: let generate action & not generate action be the same
-            if True:  # not self.generate_data:
-                obj_id = int(action[0])
-                tgt_pos = torch.zeros(3)
-                tgt_orn = action[4:]
-                tgt_pos[0] = (action[1] + 1) * (self.robot.x_workspace[1] - self.robot.x_workspace[0]) / 2 \
-                                + self.robot.x_workspace[0]
-                tgt_pos[1] = (action[2] + 1) * (self.robot.y_workspace[1] - self.robot.y_workspace[0]) / 2 \
-                                + self.robot.y_workspace[0]
-                if self.name == "allow_rotation":
-                    tgt_pos[2] = (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
-                elif self.name == "default":
-                    tgt_pos[2] = (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
-                else:
-                    raise NotImplementedError
-                tgt_orn = tgt_orn * np.pi / 2.
-                tgt_orn = p.getQuaternionFromEuler(tgt_orn)
+            obj_id = int(action[0])
+            tgt_pos = torch.zeros(3)
+            tgt_orn = action[4:]
+            tgt_pos[0] = (action[1] + 1) * (self.robot.x_workspace[1] - self.robot.x_workspace[0]) / 2 \
+                            + self.robot.x_workspace[0]
+            tgt_pos[1] = (action[2] + 1) * (self.robot.y_workspace[1] - self.robot.y_workspace[0]) / 2 \
+                            + self.robot.y_workspace[0]
+            if self.name == "allow_rotation":
+                tgt_pos[2] = (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
+            elif self.name == "default":
+                tgt_pos[2] = (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
             else:
-                obj_id = int(action[0])
-                tgt_pos = action[1:4]
-                tgt_orn = p.getQuaternionFromEuler(action[4:])
-            # get current position & orientation of the target object
-            # cur_pos, cur_orn = self.p.getBasePositionAndOrientation(self.blocks_id[obj_id])
-            if False:  # self.check_collision(cur_pos, cur_orn, obj_id) or self.check_collision(tgt_pos, tgt_orn, obj_id):
-                obs = self._get_obs()
-                reward, info = self.compute_reward_and_info()
-                done = False
-                return obs, reward, done, info
-            else:
+                raise NotImplementedError
+            tgt_orn = tgt_orn * np.pi / 2.
+            tgt_orn = p.getQuaternionFromEuler(tgt_orn)
+
+            stable = True
+            # if self._robot_feasible(self.blocks_id[obj_id], tgt_pos, tgt_orn):
+            if True:
+                # get current position & orientation of the target object
+                # cur_pos, cur_orn = self.p.getBasePositionAndOrientation(self.blocks_id[obj_id])
                 # self.robot.control(
                 #     tgt_pos, tgt_orn,
                 #     (self.robot.finger_range[0] + self.robot.finger_range[1]) / 2,
@@ -490,36 +475,105 @@ class ArmGoalEnv(gym.Env):
                 #self.frame_count += 1
                 # print(self.frame_count)
                 future_pos = self._get_achieved_goal()[0]
-                obs = self._get_obs()
-                reward, info = self.compute_reward_and_info()
-                done = False
-                if any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3):
-                    reward -= 0.001
-                #     # self.p.removeState(state_id)
-                return obs, reward, done, info
+                stable = not any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3)
+            obs = self._get_obs()
+            reward, info = self.compute_reward_and_info()
+            done = False
+            if not stable:
+                reward -= 0.001
+            #     # self.p.removeState(state_id)
+            return obs, reward, done, info
 
-        # action = np.clip(action, -1, 1)
-        action = np.clip(action, self.action_space.low, self.action_space.high)
-        delta_pos = action[:3] * 0.05
-        if len(action) == 4:
-            eef_orn = (1, 0, 0, 0)
-        elif len(action) == 7:
-            cur_rpy = self.robot.get_eef_orn(as_type="euler")
-            # rotation around z
-            new_yaw = cur_rpy[2] + action[6] * np.pi / 9  # +/- 20 degrees
-            new_pitch = cur_rpy[1] + action[5] * np.pi / 9
-            new_roll = cur_rpy[0] + action[4] * np.pi / 9
-            eef_orn = p.getQuaternionFromEuler([new_roll, new_pitch, new_yaw])
-        else:
-            raise NotImplementedError
-        finger_ctrl = (action[3] + 1) / 2 * (self.robot.finger_range[1] - self.robot.finger_range[0]) + \
-                      self.robot.finger_range[0]
-        self.robot.control(delta_pos, eef_orn, finger_ctrl)
-        obs = self._get_obs()
-        reward, info = self.compute_reward_and_info()
-        done = False
-        return obs, reward, done, info
-
+    def _robot_feasible(self, body_id, target_pos, target_quat):
+        state_id = self.p.saveState()
+        import pybullet_planning as pp
+        # generate grasp pose from object pose
+        all_eef_T_obj = []
+        for i in range(4):
+            for j in range(2):
+                eef_pos_obj, eef_quat_obj = self.p.multiplyTransforms(
+                    [0, 0, 0], [np.cos(np.pi / 4 * i), 0, 0, np.sin(np.pi / 4 * i)], 
+                    [0, 0, 0], [0, 0, np.cos(np.pi / 2 * j), np.sin(np.pi / 2 * j)]
+                )
+                all_eef_T_obj.append((eef_pos_obj, eef_quat_obj))
+        O_T_eef = (self.robot.get_eef_position(), self.robot.get_eef_orn())
+        O_T_obj = self.p.getBasePositionAndOrientation(body_id)
+        all_grasp_eef_pose = []
+        all_grasp_conf = []
+        for i in range(len(all_eef_T_obj)):
+            obj_T_eef = self.p.invertTransform(all_eef_T_obj[i][0], all_eef_T_obj[i][1])
+            grasp_eef_pose = self.p.multiplyTransforms(O_T_obj[0], O_T_obj[1], obj_T_eef[0], obj_T_eef[1])
+            all_grasp_eef_pose.append(grasp_eef_pose) 
+            all_grasp_conf.append(
+                self.p.calculateInverseKinematics(
+                    self.robot.id, self.robot.eef_index, grasp_eef_pose[0], grasp_eef_pose[1],
+                    self.robot.joint_ll[:7], self.robot.joint_ul[:7], self.robot.joint_ranges[:7], self.robot.rest_poses[:7],
+                    maxNumIterations=20,
+                )
+            )
+        # plan path
+        ik_joints= pp.get_movable_joints(self.robot.id)
+        robot_self_collision_disabled_link_names = [('panda_link0', 'panda_link1'),
+            ('panda_link1', 'panda_link2'), ('panda_link2', 'panda_link3'),
+            ('panda_link3', 'panda_link4'), ('panda_link4', 'panda_link5'),
+            ('panda_link5', 'panda_link6'), ('panda_link6', 'panda_link7'),
+            ('panda_link7', 'panda_link8'), ('panda_link8', 'panda_hand'),
+            ('panda_hand', 'panda_leftfinger'), ('panda_hand', 'panda_rightfinger'),
+            ] 
+        self_collision_links = pp.get_disabled_collisions(self.robot.id, robot_self_collision_disabled_link_names)
+        path_found = False
+        for i in range(len(all_grasp_conf)):
+            # TODO: check whether the environment has changed
+            path = pp.plan_joint_motion(
+                self.robot.id, ik_joints, all_grasp_conf[i], obstacles=self.blocks_id + [self.table_id], attachments=[],
+                self_collisions=True, disabled_collisions=self_collision_links, extra_disabled_collisions=set(),
+                weights=None, resolutions=None, custom_limits={}, diagnosis=False
+            )
+            if path is not None:
+                path_found = True
+                pp.set_joint_position(self.robot.id, ik_joints, path[-1])
+                break
+        if not path_found:
+            self.p.restoreState(state_id)
+            self.p.removeState(state_id)
+            return False
+        # go to target
+        all_release_conf = []
+        for i in range(len(all_eef_T_obj)):
+            obj_T_eef = self.p.invertTransform(all_eef_T_obj[i][0], all_eef_T_obj[i][1])
+            release_eef_pose = self.p.multiplyTransforms(target_pos[0], target_quat[1], obj_T_eef[0], obj_T_eef[1])
+            all_release_conf.append(
+                self.p.calculateInverseKinematics(
+                    self.robot.id, self.robot.eef_index, release_eef_pose[0], release_eef_pose[1],
+                    self.robot.joint_ll[:7], self.robot.joint_ul[:7], self.robot.joint_ranges[:7], self.robot.rest_poses[:7],
+                    maxNumIterations=20,
+                )
+            )
+        # create attachment
+        block_attach = pp.create_attachment(self.robot.id, self.robot.eef_index, body_id)
+        block_attach.assign()
+        path_found = False
+        for i in range(len(all_release_conf)):
+            path = pp.plan_joint_motion(
+                self.robot.id, ik_joints, all_release_conf[i], 
+                obstacles=[block_id for block_id in self.blocks_id if block_id != body_id] + [self.table_id],
+                attachments=[block_attach], self_collisions=True, disabled_collisions=self_collision_links,
+            )
+            if path is not None:
+                path_found = True
+                pp.set_joint_position(self.robot.id, ik_joints, path[-1])
+                break
+        if not path_found:
+            self.p.restoreState(state_id)
+            self.p.removeState(state_id)
+            return False
+        # move to some reset pose
+        
+        self.p.restoreState(state_id)
+        self.p.removeState(state_id)
+        return True
+        
+            
     def render(self, mode="rgb_array", width=500, height=500):
         from bullet_envs.env.primitive_env import render
         scene = render(self.p, width=128, height=128, robot=self.robot, view_mode="third",
@@ -606,7 +660,7 @@ class ArmGoalEnv(gym.Env):
 
 
 class ArmPickAndPlace(ArmGoalEnv):
-    def __init__(self, robot="panda", seed=None, n_object=6, reward_type="sparse", primitive=False, action_dim=4, generate_data=False):
+    def __init__(self, robot="panda", seed=None, n_object=6, reward_type="sparse", primitive=False, action_dim=4, generate_data=False, use_gpu_render=True):
         self.env_id = "BulletPickAndPlace-v1"
         self.name = "allow_rotation"
         self.generate_data = generate_data
@@ -638,7 +692,7 @@ class ArmPickAndPlace(ArmGoalEnv):
         # n_goal becomes 2 with some prob
 
         self.stack = False
-        super(ArmPickAndPlace, self).__init__(robot, seed, action_dim, generate_data)
+        super(ArmPickAndPlace, self).__init__(robot, seed, action_dim, generate_data, use_gpu_render)
 
     def _setup_callback(self):
         for i in range(self.n_object):
@@ -1963,7 +2017,26 @@ class ArmStack(ArmPickAndPlace):
         # exit()
         return robot_obs, init_state, goal_state, goal_image
 
-
+    def create_canonical_view(self):
+        for shape in self.p.getVisualShapeData(self.table_id):
+            self.p.changeVisualShape(self.table_id, shape[1], rgbaColor=(1, 1, 1, 0))
+        images = []
+        for obj_idx in range(self.n_object):
+            for i in range(self.n_object):
+                if i == obj_idx:
+                    target_position = np.array([np.mean(self.robot.x_workspace), np.mean(self.robot.y_workspace), 0.025])
+                    target_orientation = np.array([0., 0., 0., 1.])
+                else:
+                    target_position = np.array([self.robot.x_workspace[0], 10, 0.025 + 0.05 * i])
+                    target_orientation = np.array([0., 0., 0., 1.])
+                self.p.resetBasePositionAndOrientation(self.blocks_id[i], target_position, target_orientation)
+            from bullet_envs.env.primitive_env import render
+            image = render(self.p, width=128, height=128, robot=self.robot, view_mode="third",
+                        pitch=-45, distance=0.6,
+                        camera_target_position=(0.5, 0.0, 0.1)).transpose((2, 0, 1))[:3, 48: 80, 48: 80]
+            images.append(image)
+        return images
+    
 def _create_block(physics_client, halfExtents, pos, orn, mass=0.2, rgba=None, vel=None, vela=None):
     col_id = physics_client.createCollisionShape(physics_client.GEOM_BOX, halfExtents=halfExtents)
     vis_id = physics_client.createVisualShape(physics_client.GEOM_BOX, halfExtents=halfExtents)

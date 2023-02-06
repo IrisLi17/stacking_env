@@ -20,10 +20,9 @@ egl = pkgutil.get_loader('eglRenderer')
 
 
 class PixelStack(ArmStack):
-    def __init__(self, view_mode="third", use_gpu_render=True, feature_dim=768, 
+    def __init__(self, view_mode="third", feature_dim=768, 
                  shift_params=(0, 0), *args, **kwargs):
         self.view_mode = view_mode
-        self.use_gpu_render = use_gpu_render
         self.privilege_dim = None
         self.feature_dim = feature_dim
         self.shift_params = shift_params
@@ -35,13 +34,13 @@ class PixelStack(ArmStack):
         # )
         super().__init__(*args, **kwargs)
     
-    def _create_simulation(self):
-        self.p = bc.BulletClient(connection_mode=p.DIRECT)
-        if self.use_gpu_render:
-            plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
-            print("plugin=", plugin)
-            self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
-            self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
+    # def _create_simulation(self):
+    #     self.p = bc.BulletClient(connection_mode=p.DIRECT)
+    #     if self.use_gpu_render:
+    #         plugin = self.p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
+    #         print("plugin=", plugin)
+    #         self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
+    #         self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
     
     def _setup_callback(self):
         super()._setup_callback()
