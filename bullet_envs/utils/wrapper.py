@@ -128,11 +128,13 @@ class FlexibleTimeLimitWrapper(gym.Wrapper):
 
 
 class MVPVecPyTorch(VecEnvWrapper):
-    def __init__(self, venv, device, observation_space=None, action_space=None, use_patch_feat=False):
+    def __init__(self, venv, device, observation_space=None, action_space=None, use_raw_img=False):
         super().__init__(venv, observation_space, action_space)
         self.device = device
         from bullet_envs.utils.image_processor import ImageProcessor
-        self.image_processor = ImageProcessor(device, use_patch_feat)
+        self.use_raw_img = use_raw_img
+        self.use_patch_feat = False
+        self.image_processor = ImageProcessor(device)
         self.mvp_feat_dim = None
         self.robot_state_dim = None
         self.privilege_info_dim = None
@@ -157,9 +159,9 @@ class MVPVecPyTorch(VecEnvWrapper):
                     obs[key] = np.expand_dims(obs[key], axis=0)
         # sometimes, we don't have goal images. The correct feature should be set in "mvp_goal_feature"
         precomputed_goal_feat_mask = obs["goal_source"].astype(np.bool).squeeze(axis=-1)
-        scene_feat = self.image_processor.mvp_process_image(obs["img"])
-        goal_feat = self.image_processor.mvp_process_image(obs["goal"])
-        if not np.all(precomputed_goal_feat_mask):
+        scene_feat = self.image_processor.mvp_process_image(obs["img"], self.use_patch_feat, self.use_raw_img)
+        goal_feat = self.image_processor.mvp_process_image(obs["goal"], self.use_patch_feat, self.use_raw_img)
+        if np.any(precomputed_goal_feat_mask):
             goal_feat[precomputed_goal_feat_mask] = torch.from_numpy(
                 obs["goal_feature"][precomputed_goal_feat_mask]).float().to(self.device)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
