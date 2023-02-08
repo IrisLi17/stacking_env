@@ -166,7 +166,10 @@ class MVPVecPyTorch(VecEnvWrapper):
                 obs["goal_feature"][precomputed_goal_feat_mask]).float().to(self.device)
         robot_state = torch.from_numpy(obs["robot_state"]).float().to(self.device)
         privilege_info = torch.from_numpy(obs["privilege_info"]).float().to(self.device)
-        obs = torch.cat([scene_feat, goal_feat, robot_state, privilege_info], dim=-1)
+        if not self.use_raw_img:
+            obs = torch.cat([scene_feat, robot_state, goal_feat, privilege_info], dim=-1)
+        else:
+            obs = torch.cat([scene_feat, goal_feat, robot_state, privilege_info], dim=-1)
         if self.mvp_feat_dim is None:
             self.mvp_feat_dim = scene_feat.shape[-1]
         if self.robot_state_dim is None:

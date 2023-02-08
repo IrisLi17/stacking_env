@@ -17,8 +17,15 @@ import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
 
 DATAROOT = pybullet_data.getDataPath()
+# raw image training
+# COLOR = [[1.0, 0, 0], [1, 1, 0], [0.2, 0.8, 0.8], [0.8, 0.2, 0.8], [0.2, 0.8, 0.2], [0.0, 0.0, 1.0], [0.5, 0.2, 0.0],
+#          [0.2, 0, 0.5], [0, 0.2, 0.5]]
+# mvp training
 COLOR = [[1.0, 0, 0], [1, 1, 0], [0.2, 0.8, 0.8], [0.8, 0.2, 0.8], [0, 0, 0], [0.0, 0.0, 1.0], [0.5, 0.2, 0.0],
          [0.2, 0, 0.5], [0, 0.2, 0.5]]
+# FAKE
+# COLOR = [[1, 1, 0], [1, 1, 0], [1, 1, 0], [1, 1, 0], [1, 1, 0], [1, 1, 0.0], [0.5, 0.2, 0.0],
+#          [0.2, 0, 0.5], [0, 0.2, 0.5]]
 FRAMECOUNT = 0
 
 
@@ -73,6 +80,8 @@ class ArmGoalEnv(gym.Env):
         )
         for shape in self.p.getVisualShapeData(self.plane_id):
             self.p.changeVisualShape(self.plane_id, shape[1], rgbaColor=(1, 1, 1, 1))
+        # for shape in self.p.getVisualShapeData(self.table_id):
+        #     self.p.changeVisualShape(self.table_id, shape[1], rgbaColor=(0, 0, 0, 1))
         if robot == "xarm":
             from bullet_envs.env.robot import XArmRobot
             self.robot = XArmRobot(self.p, init_qpos, base_position)
@@ -1267,7 +1276,7 @@ class ArmPickAndPlace(ArmGoalEnv):
 # n_max_goal
 class ArmStack(ArmPickAndPlace):
     def __init__(self, *args, n_to_stack=[[1, 2, 3], [1, 2, 3]], name=None, generate_data=False, action_dim=4, 
-                 use_expand_goal_prob=0, expand_task_path=None, **kwargs):
+                 use_expand_goal_prob=0, expand_task_path=None, permute_object=False, **kwargs):
         self.env_id = "BulletStack-v1"
         self.name = name
         self.generate_data = generate_data
@@ -1316,7 +1325,7 @@ class ArmStack(ArmPickAndPlace):
                 self.offline_datasets = data["expansion"]  # 4300 data in form of obs, actions, rewards
                 # self.classified_data = self.gen_data_classify(data)
                 # self.n_inside_pyramid = self.data_statistics(data["expansion"])
-
+        self.permute_object = permute_object
         super(ArmStack, self).__init__(*args, generate_data=generate_data, action_dim=action_dim, **kwargs)
 
     def gen_data_classify(self, data):
@@ -1433,9 +1442,12 @@ class ArmStack(ArmPickAndPlace):
             self.traj_idx = traj_idx
             self.expand_traj = self.offline_datasets[traj_idx]["obs"][0]
             print("traj idx", self.traj_idx)
+            self.object_permutation = np.arange(self.n_object)
+            if self.permute_object:
+                np.random.shuffle(self.object_permutation)
             for n in range(self.n_object):
                 self.p.resetBasePositionAndOrientation(
-                    self.blocks_id[n], self.expand_traj[11 + 16 * n: 14 + 16 * n],
+                    self.blocks_id[self.object_permutation[n]], self.expand_traj[11 + 16 * n: 14 + 16 * n],
                     self.p.getQuaternionFromEuler(self.expand_traj[17 + 16 * n: 20 + 16 * n])  # todo
                 )
             self.robot.control(self.expand_traj[:3], (1, 0, 0, 0), 0., relative=False, teleport=True)
@@ -1583,6 +1595,14 @@ class ArmStack(ArmPickAndPlace):
                 assert (len(self.expand_traj) - self.robot_dim - self.n_object * self.object_dim) % (6 + self.n_object) == 0
                 n_goal = (len(self.expand_traj) - self.robot_dim - self.n_object * self.object_dim) / (6 + self.n_object)
                 goal = self.expand_traj[-(6 + self.n_object) * self.n_max_goal:]
+                if self.permute_object:
+                    # change onehot according to object permutation
+                    goal = np.reshape(goal, (self.n_max_goal, 6 + self.n_object))
+                    for j in range(self.n_max_goal):
+                        if np.max(goal[j][6:]) == 1:
+                            obj_idx = self.object_permutation[np.argmax(goal[j][6:])]
+                            goal[j][6:] = 0.
+                            goal[j][6 + obj_idx] = 1.
                 goal = np.reshape(goal, (-1, (6 + self.n_object) * self.n_max_goal))
                 self.visualize_goal(goal, True)
             else:
@@ -1983,14 +2003,16 @@ class ArmStack(ArmPickAndPlace):
             init_state.append(np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
         init_state = np.concatenate(init_state)
         # goal
-        offset = np.array([np.mean(self.robot.x_workspace) + 0.1, np.mean(self.robot.y_workspace), 0.])
+        # Change to be consistent with state version
+        x_ = self.np_random.uniform(*[0.3, 0.5])
+        y_ = self.np_random.uniform(*[-0.1, 0.1])
         goal_poses = [
-            (np.array([-0.05 / np.sqrt(3), 0.06 * 2, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))), 
-            (np.array([-0.05 / np.sqrt(3), -0.06 * 2, 0.075]) + offset, np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))),
-            (np.array([0.1 / np.sqrt(3), 0.0, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
-            (np.array([-0.05 / np.sqrt(3), 0.06 * 2, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
-            (np.array([-0.05 / np.sqrt(3), -0.06 * 2, 0.175]) + offset, np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
-            (np.array([0.1 / np.sqrt(3), 0.0, 0.175]) + offset, np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]))
+            (np.array([x_+0.142, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
+            (np.array([x_+0.142, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+            (np.array([x_-0.046, y_+0.12, 0.175]), np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
+            (np.array([x_-0.046, y_+0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))), 
+            (np.array([x_-0.046, y_-0.12, 0.175]), np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
+            (np.array([x_-0.046, y_-0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))),
         ]
         # goal_poses = [
         #     (np.array([0.0, -0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
@@ -2018,8 +2040,8 @@ class ArmStack(ArmPickAndPlace):
         return robot_obs, init_state, goal_state, goal_image
 
     def create_canonical_view(self):
-        for shape in self.p.getVisualShapeData(self.table_id):
-            self.p.changeVisualShape(self.table_id, shape[1], rgbaColor=(1, 1, 1, 0))
+        # for shape in self.p.getVisualShapeData(self.table_id):
+        #     self.p.changeVisualShape(self.table_id, shape[1], rgbaColor=(0, 0, 0, 1))
         images = []
         for obj_idx in range(self.n_object):
             for i in range(self.n_object):
@@ -2034,6 +2056,7 @@ class ArmStack(ArmPickAndPlace):
             image = render(self.p, width=128, height=128, robot=self.robot, view_mode="third",
                         pitch=-45, distance=0.6,
                         camera_target_position=(0.5, 0.0, 0.1)).transpose((2, 0, 1))[:3, 48: 80, 48: 80]
+            # plt.imsave("tmp/tmp%d.png" % obj_idx, image.transpose((1, 2, 0)).astype(np.uint8))
             images.append(image)
         return images
     
