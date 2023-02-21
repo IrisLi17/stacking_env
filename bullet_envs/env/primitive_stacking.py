@@ -675,11 +675,11 @@ class ArmPickAndPlace(ArmGoalEnv):
         self.generate_data = generate_data
         self.action_dim = action_dim
         if self.name == "allow_rotation":
-            self.n_max_goal = 3
+            self.n_max_goal = 6
             self.n_goal = 1
             # self.n_goal = random.choice(range(1, self.n_max_goal + 1))
         elif self.name == "default":
-            self.n_max_goal = 3
+            self.n_max_goal = 6
             self.n_goal = self.n_max_goal
         else:
             raise NotImplementedError
@@ -1285,7 +1285,7 @@ class ArmStack(ArmPickAndPlace):
             self.action_space = spaces.Box(-1., 1., shape=(self.action_dim,))
         if self.name == "allow_rotation":
             self.n_object = 6
-            self.n_max_goal = 3
+            self.n_max_goal = 6
             self.change_height_prob = 0  # whether use rectangle
             # self.use_expand_goal_prob = 1  # for rl tuning, use saved expand trajectory as goal or not
             self.use_expand_goal_prob = use_expand_goal_prob
@@ -1295,7 +1295,7 @@ class ArmStack(ArmPickAndPlace):
             self.pyramid_evaluation = False
         elif self.name == "default":
             self.n_object = 6
-            self.n_max_goal = 3
+            self.n_max_goal = 6
             self.change_height_prob = 0  # whether use rectangle
             self.use_expand_goal_prob = use_expand_goal_prob  # for rl tuning, use saved expand trajectory as goal or not
             self.put_goal_aside_prob = 0  # use pyramid expansion or not
@@ -1438,10 +1438,13 @@ class ArmStack(ArmPickAndPlace):
             #    traj_idx = int(random.choice(self.classified_data["up_225"]))
             #else:
             #    traj_idx = int(random.choice(self.classified_data["hor_075"]))
-            traj_idx = int(random.sample(range(len(self.offline_datasets)), 1)[0])
-            self.traj_idx = traj_idx
-            self.expand_traj = self.offline_datasets[traj_idx]["obs"][0]
-            print("traj idx", self.traj_idx)
+            if hasattr(self, "presampled_obs"):
+                self.expand_traj = self.presampled_obs
+            else:
+                traj_idx = int(random.sample(range(len(self.offline_datasets)), 1)[0])
+                self.traj_idx = traj_idx
+                self.expand_traj = self.offline_datasets[traj_idx]["obs"][0]
+                print("traj idx", self.traj_idx)
             self.object_permutation = np.arange(self.n_object)
             if self.permute_object:
                 np.random.shuffle(self.object_permutation)
@@ -1594,7 +1597,11 @@ class ArmStack(ArmPickAndPlace):
             if self.primitive:
                 assert (len(self.expand_traj) - self.robot_dim - self.n_object * self.object_dim) % (6 + self.n_object) == 0
                 n_goal = (len(self.expand_traj) - self.robot_dim - self.n_object * self.object_dim) / (6 + self.n_object)
-                goal = self.expand_traj[-(6 + self.n_object) * self.n_max_goal:]
+                if int(n_goal / 2) != self.n_max_goal:
+                    print("Warning: data n_goal different from env n_goal")
+                    goal = np.concatenate([self.expand_traj[-(6 + self.n_object) * int(n_goal / 2):], -1 * np.ones((6 + self.n_object) * (self.n_max_goal - int(n_goal / 2)))])
+                else:
+                    goal = self.expand_traj[-(6 + self.n_object) * self.n_max_goal:]
                 if self.permute_object:
                     # change onehot according to object permutation
                     goal = np.reshape(goal, (self.n_max_goal, 6 + self.n_object))
@@ -1981,7 +1988,11 @@ class ArmStack(ArmPickAndPlace):
     def set_cl_ratio(self, cl_ratio):
         self.cl_ratio = cl_ratio
     
-    def create_generalize_task(self):
+    def set_obs_debug(self, traj_obs):
+        self.presampled_obs = traj_obs
+    
+    def create_generalize_task(self, shape="3T"):
+        assert shape in ["3T", "I", "Y"]
         robot_obs = self.robot.get_obs()
         all_position = np.array([
             [self.np_random.uniform(*self.robot.x_workspace),
@@ -2006,14 +2017,27 @@ class ArmStack(ArmPickAndPlace):
         # Change to be consistent with state version
         x_ = self.np_random.uniform(*[0.3, 0.5])
         y_ = self.np_random.uniform(*[-0.1, 0.1])
-        goal_poses = [
-            (np.array([x_+0.142, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
-            (np.array([x_+0.142, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
-            (np.array([x_-0.046, y_+0.12, 0.175]), np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
-            (np.array([x_-0.046, y_+0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))), 
-            (np.array([x_-0.046, y_-0.12, 0.175]), np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
-            (np.array([x_-0.046, y_-0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))),
-        ]
+        if shape == "3T":
+            goal_poses = [
+                (np.array([x_+0.142, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
+                (np.array([x_+0.142, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_-0.046, y_+0.12, 0.175]), np.array([0., 0., np.sin(np.pi / 12), np.cos(np.pi / 12)])),
+                (np.array([x_-0.046, y_+0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, -np.pi / 3]))), 
+                (np.array([x_-0.046, y_-0.12, 0.175]), np.array([0., 0., np.sin(-np.pi / 12), np.cos(-np.pi / 12)])),
+                (np.array([x_-0.046, y_-0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))),
+            ]
+        elif shape == "I":
+            goal_poses = [
+                (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
+                (np.array([x_, y_, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+            ]
+        elif shape == "Y":
+            goal_poses = [
+                (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.a)
+            ]
+            goal = np.array([[x_, y_, 0.175], [x_, y_+0.05, 0.275], [x_, y_-0.05, 0.275]])
         # goal_poses = [
         #     (np.array([0.0, -0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
         #     (np.array([0.0, -0.12, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
