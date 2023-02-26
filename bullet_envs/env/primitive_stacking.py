@@ -2035,9 +2035,14 @@ class ArmStack(ArmPickAndPlace):
         elif shape == "Y":
             goal_poses = [
                 (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
-                (np.a)
+                (np.array([x_, y_+0.05, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_-0.05, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
+                (np.array([x_, y_+0.05, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_-0.05, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
             ]
-            goal = np.array([[x_, y_, 0.175], [x_, y_+0.05, 0.275], [x_, y_-0.05, 0.275]])
+        else:
+            raise NotImplementedError
         # goal_poses = [
         #     (np.array([0.0, -0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
         #     (np.array([0.0, -0.12, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),

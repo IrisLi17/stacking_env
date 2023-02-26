@@ -30,7 +30,7 @@ gym.register(
 )
 
 gym.register(
-    "BulletPixelStack-v1", entry_point=PixelStack, max_episode_steps=20,
+    "BulletPixelStack-v1", entry_point=PixelStack, max_episode_steps=30,
 )
 
 gym.register(
