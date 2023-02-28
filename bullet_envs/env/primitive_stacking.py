@@ -2013,6 +2013,8 @@ class ArmStack(ArmPickAndPlace):
                 obj_quat = -obj_quat
             init_state.append(np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
         init_state = np.concatenate(init_state)
+        obj_idxs = np.arange(self.n_object)
+        np.random.shuffle(obj_idxs)
         # goal
         # Change to be consistent with state version
         x_ = self.np_random.uniform(*[0.3, 0.5])
@@ -2027,6 +2029,17 @@ class ArmStack(ArmPickAndPlace):
                 (np.array([x_-0.046, y_-0.12, 0.075]), np.array(self.p.getQuaternionFromEuler([0., np.pi / 2, np.pi / 3]))),
             ]
         elif shape == "I":
+            # check x_, y_ are not located on other objects
+            def check_xy():
+                for i in range(3, self.n_object):
+                    if np.linalg.norm(init_state[7 * i: 7 * i + 2] - np.array([x_, y_])) < 0.075:
+                        return False
+                return True
+            reset_count = 0
+            while not check_xy() and reset_count < 50:
+                x_ = self.np_random.uniform(*[0.3, 0.5])
+                y_ = self.np_random.uniform(*[-0.1, 0.1])
+                reset_count += 1
             goal_poses = [
                 (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
                 (np.array([x_, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
@@ -2051,8 +2064,6 @@ class ArmStack(ArmPickAndPlace):
         #     (np.array([0.0, 0.12, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
         #     (np.array([0.0, 0.2, 0.075]) + offset, np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
         # ]
-        obj_idxs = np.arange(self.n_object)
-        np.random.shuffle(obj_idxs)
         for i in range(len(goal_poses)):
             self.p.resetBasePositionAndOrientation(self.blocks_id[obj_idxs[i]], goal_poses[i][0], goal_poses[i][1])
         goal_state = []
