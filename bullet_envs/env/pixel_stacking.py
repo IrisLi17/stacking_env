@@ -8,7 +8,7 @@
 
 
 from bullet_envs.env.primitive_stacking import ArmStack
-from bullet_envs.env.primitive_env import render, BasePrimitiveEnv
+from bullet_envs.env.primitive_env import render
 import os
 import numpy as np
 from functools import partial

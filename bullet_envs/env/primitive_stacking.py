@@ -1992,7 +1992,7 @@ class ArmStack(ArmPickAndPlace):
         self.presampled_obs = traj_obs
     
     def create_generalize_task(self, shape="3T"):
-        assert shape in ["3T", "I", "Y"]
+        assert shape in ["3T", "I", "Y", "Y_v2", "2I"]
         robot_obs = self.robot.get_obs()
         all_position = np.array([
             [self.np_random.uniform(*self.robot.x_workspace),
@@ -2045,6 +2045,15 @@ class ArmStack(ArmPickAndPlace):
                 (np.array([x_, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
                 (np.array([x_, y_, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
             ]
+        elif shape == "2I":
+            goal_poses = [
+                (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
+                (np.array([x_, y_, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([0.8 - x_, -y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([0.8 - x_, -y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
+                (np.array([0.8 - x_, -y_, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+            ]
         elif shape == "Y":
             goal_poses = [
                 (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
@@ -2053,6 +2062,25 @@ class ArmStack(ArmPickAndPlace):
                 (np.array([x_, y_, 0.175]), np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)])),
                 (np.array([x_, y_+0.05, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
                 (np.array([x_, y_-0.05, 0.275]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+            ]
+        elif shape == "Y_v2":
+            # check x_, y_ are not located on other objects
+            def check_xy():
+                for i in range(5, self.n_object):
+                    if init_state[7 * i] < x_ + 0.05:
+                        return False
+                return True
+            reset_count = 0
+            while not check_xy() and reset_count < 50:
+                x_ = self.np_random.uniform(*[0.3, 0.5])
+                y_ = self.np_random.uniform(*[-0.1, 0.1])
+                reset_count += 1
+            goal_poses = [
+                (np.array([x_, y_, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_+0.05, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_-0.05, 0.075]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_+0.05, 0.225]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
+                (np.array([x_, y_-0.05, 0.225]), np.array([0., np.sin(np.pi / 4), 0., np.cos(np.pi / 4)])),
             ]
         else:
             raise NotImplementedError
