@@ -1,0 +1,6 @@
+rotations.cpp
+setup.py
+rotations.egg-info/PKG-INFO
+rotations.egg-info/SOURCES.txt
+rotations.egg-info/dependency_links.txt
+rotations.egg-info/top_level.txt
