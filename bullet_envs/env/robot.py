@@ -235,6 +235,14 @@ class PandaRobot(object):
                                     childFramePosition=[0, 0, 0])
         self.p.changeConstraint(c, gearRatio=-1, erp=0.1, maxForce=50)
 
+    @property
+    def _robot(self):
+        return self.id
+    
+    @property
+    def motorIndices(self):
+        return self.motor_indices
+
     def get_obs(self):
         # joint_pos = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
         # scaled_joint_pos = 2 * (joint_pos - np.array(self.joint_ll[:7])) / (np.array(self.joint_ul[:7]) - np.array(self.joint_ll[:7])) - 1.0

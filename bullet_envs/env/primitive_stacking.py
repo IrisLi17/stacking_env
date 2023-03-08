@@ -12,6 +12,7 @@ import pickle
 import matplotlib.pyplot as plt
 import shutil
 import math
+import copy
 from collections import OrderedDict
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
@@ -28,9 +29,8 @@ COLOR = [[1.0, 0, 0], [1, 1, 0], [0.2, 0.8, 0.8], [0.8, 0.2, 0.8], [0.2, 0.8, 0.
 #          [0.2, 0, 0.5], [0, 0.2, 0.5]]
 FRAMECOUNT = 0
 
-
 class ArmGoalEnv(gym.Env):
-    def __init__(self, robot="panda", seed=None, action_dim=4, generate_data=None, use_gpu_render=True):
+    def __init__(self, robot="xarm", seed=None, action_dim=4, generate_data=None, use_gpu_render=True):
         self.seed(seed)
         self.use_gpu_render = use_gpu_render
 
@@ -67,7 +67,8 @@ class ArmGoalEnv(gym.Env):
             self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
             self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
     
-    def _setup_env(self, robot, init_qpos=None, base_position=(0, 0, 0)):
+    def _setup_env(self, robot, init_qpos=None, init_end_effector_pos=(1.0, 0.6, 0.4), init_end_effector_orn=(0, -np.pi, np.pi / 2),
+                 useNullSpace=True, base_position=(0, 0, 0)):
         self._create_simulation()
         self.p.resetSimulation()
         self.p.setTimeStep(self.dt)
@@ -83,11 +84,16 @@ class ArmGoalEnv(gym.Env):
         # for shape in self.p.getVisualShapeData(self.table_id):
         #     self.p.changeVisualShape(self.table_id, shape[1], rgbaColor=(0, 0, 0, 1))
         if robot == "xarm":
-            from bullet_envs.env.robot import XArmRobot
-            self.robot = XArmRobot(self.p, init_qpos, base_position)
+            from bullet_envs.env.robots import XArm7Robot
+            self.robot = XArm7Robot(self.p)
         elif robot == "panda":
             from bullet_envs.env.robot import PandaRobot  # env.
             self.robot = PandaRobot(self.p, init_qpos, base_position)
+        elif robot == "ur":
+            from bullet_envs.env.robots import UR2f85Robot
+            self.robot = UR2f85Robot(self.p, init_qpos=init_qpos, init_end_effector_pos=init_end_effector_pos,
+                                     init_end_effector_orn=init_end_effector_orn, useOrientation=True,
+                                     useNullSpace=useNullSpace)
         else:
             raise NotImplementedError
         self._setup_callback()
@@ -584,20 +590,27 @@ class ArmGoalEnv(gym.Env):
         
             
     def render(self, mode="rgb_array", width=500, height=500):
-        from bullet_envs.env.primitive_env import render
+        '''from bullet_envs.env.primitive_env import render
         scene = render(self.p, width=128, height=128, robot=self.robot, view_mode="third",
                        pitch=-45, distance=0.6,
                        camera_target_position=(0.5, 0.0, 0.1)).transpose((2, 0, 1))[:3]
-        return scene
+        return scene'''
         if mode == 'rgb_array':
-            view_matrix = self.p.computeViewMatrixFromYawPitchRoll(
+            '''view_matrix = self.p.computeViewMatrixFromYawPitchRoll(
                 cameraTargetPosition=(0.3, 0, 0.2),
                 distance=1.0,
                 yaw=60,
                 pitch=-10,
                 roll=0,
                 upAxisIndex=2,
-            )
+            )'''
+            
+            view_matrix = self.p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=[0.5, 0.0, 0.1],
+                                                                   distance=1.1,
+                                                                   yaw=-60,
+                                                                   pitch=-20,
+                                                                   roll=0,
+                                                                   upAxisIndex=2)
             proj_matrix = self.p.computeProjectionMatrixFOV(
                 fov=60, aspect=1.0, nearVal=0.1, farVal=100.0
             )
@@ -669,7 +682,7 @@ class ArmGoalEnv(gym.Env):
 
 
 class ArmPickAndPlace(ArmGoalEnv):
-    def __init__(self, robot="panda", seed=None, n_object=6, reward_type="sparse", primitive=False, action_dim=4, generate_data=False, use_gpu_render=True):
+    def __init__(self, robot="xarm", seed=None, n_object=6, reward_type="sparse", primitive=False, action_dim=4, generate_data=False, use_gpu_render=True, invisible_robot=True):
         self.env_id = "BulletPickAndPlace-v1"
         self.name = "allow_rotation"
         self.generate_data = generate_data
@@ -698,6 +711,7 @@ class ArmPickAndPlace(ArmGoalEnv):
         self.goal_type = "concat"
         self.goal_pos_type = "ground"
         self.n_goal_prob = 0.5  # 0.3, 0.5, 0.7 for curriculum learning
+        self.invisible_robot = invisible_robot
         # n_goal becomes 2 with some prob
 
         self.stack = False
@@ -717,9 +731,12 @@ class ArmPickAndPlace(ArmGoalEnv):
                         self.p, [0.025, 0.025, 0.025], [10, 0, 1 + 0.5 * i], [0, 0, 0, 1], 0.1, COLOR[i % len(COLOR)]
                     )
                 )
+            for block_id in self.blocks_id:
+                print(f"[DEBUG] block{block_id}:", self.p.getCollisionShapeData(block_id, -1), flush=True)
         # Make the robot invisible
-        for shape in self.p.getVisualShapeData(self.robot.id):
-            self.p.changeVisualShape(self.robot.id, shape[1], rgbaColor=(0, 0, 0, 0))
+        if self.invisible_robot:
+            for shape in self.p.getVisualShapeData(self.robot.id):
+                self.p.changeVisualShape(self.robot.id, shape[1], rgbaColor=(0, 0, 0, 0))
 
     def reset(self):
         obs_dict = super().reset()
@@ -879,6 +896,11 @@ class ArmPickAndPlace(ArmGoalEnv):
         block_positions = np.array([[self.np_random.uniform(*x_range), self.np_random.uniform(*y_range), z_range[0]]
                                     for _ in range(self.n_active_object)]
                                    + [[eef_pos[0], eef_pos[1], z_range[0]]])
+        '''block_positions = np.array([[x_range[0] + (x_range[1] - x_range[0])* ( _ / self.n_active_object + 0.5), 
+                                     y_range[0] + (y_range[1] - y_range[0])* ( _ / self.n_active_object + 0.5), 
+                                     z_range[0]]
+                                    for _ in range(self.n_active_object)]
+                                   + [[eef_pos[0], eef_pos[1], z_range[0]]])'''
         block_halfextent = np.array(self.p.getCollisionShapeData(self.blocks_id[0], -1)[0][3]) / 2
         while _in_collision(block_positions, block_halfextent):
             block_positions = np.array([[self.np_random.uniform(*x_range), self.np_random.uniform(*y_range), z_range[0]]
@@ -905,6 +927,7 @@ class ArmPickAndPlace(ArmGoalEnv):
 
     # randomize orientation if allow rotation
     def gen_obj_quat(self):
+        return (0, 0, 0, 1)
         if self.action_space.shape[0] == 7:
             angle = self.np_random.uniform(-np.pi, np.pi)
             obj_quat = (0, 0, np.cos(angle / 2), np.sin(angle / 2))
@@ -1250,14 +1273,18 @@ class ArmPickAndPlace(ArmGoalEnv):
             )
         return state_dict
 
-    def set_state(self, state_dict, env_number=None):
+    def set_state(self, state_dict, env_number=None, set_robot_state=True, reset_robot=False):
         if env_number is not None:
             self.env_number = env_number
-        self.robot.set_state(state_dict["robot"])
+        if set_robot_state:
+            self.robot.set_state(state_dict["robot"])
+        if reset_robot:
+            self.robot.reset()
         for i in range(self.n_object):
             qpos = state_dict["objects"]["qpos"][i]
             qvel = state_dict["objects"]["qvel"][i]
             self.p.resetBasePositionAndOrientation(self.blocks_id[i], qpos[:3], qpos[3:])
+            print(f"Set block {i} to {qpos[:3]}")
             self.p.resetBaseVelocity(self.blocks_id[i], qvel[:3], qvel[3:])
 
     def get_env_number(self):
@@ -1415,9 +1442,16 @@ class ArmStack(ArmPickAndPlace):
         # todo: more distracting tasks, e.g. distracting towers
         # self.robot.control([self.robot.base_pos[0] + 0.2, self.robot.base_pos[1] - 0.2, self.robot.base_pos[2] + 0.3],
         #                    (1, 0, 0, 0), 0., relative=False, teleport=True)
-        self.robot.set_state(dict(qpos=np.array([-0.35720248, -0.75528038, -0.36600858, -2.77078997, -0.27654494,
-                                                 2.02585467, 0.28351196, 0., 0., 0., 0., 0.]),
+        try:
+            self.robot.set_state(dict(qpos=np.array([-0.35720248, -0.75528038, -0.36600858, -2.77078997, -0.27654494,
+                                                  2.02585467, 0.28351196, 0., 0., 0., 0., 0.]),
                                   qvel=np.zeros(12)))
+        except:
+            pass
+        try:
+            self.robot.reset()
+        except:
+            pass
         if random.uniform(0, 1) < self.use_expand_goal_prob:
             self.use_expand_goal = True
             # if random.uniform(0, 1) < 0.4:  # 0.4, 0.5
@@ -2128,6 +2162,153 @@ class ArmStack(ArmPickAndPlace):
             images.append(image)
         return images
     
+class ArmStackwLowPlanner(ArmStack):
+    def __init__(self, *args, actionRepeat=10, use_low_level_planner=True, force_scale=0., compute_path=False, **kwargs):
+        self.action_repeat = actionRepeat
+        self.use_low_level_planner = use_low_level_planner
+        self.compute_path = compute_path
+
+        self.__init_args = copy.deepcopy(args)
+        self.__init_kwargs = copy.deepcopy(kwargs)
+
+        super().__init__(*args, **kwargs)
+
+        if self.use_low_level_planner:
+            self._create_low_level_planner(force_scale, kwargs.get('robot'))
+    
+    def _create_low_level_planner(self, force_scale, robot):
+        from bullet_envs.env.primitive_stacking_lowlevel import LowLevelEnv
+        # Create low level env for planning
+        self.plan_low = LowLevelEnv(*self.__init_args, actionRepeat=self.action_repeat, **self.__init_kwargs)
+        from bullet_envs.env.primitive_stacking_planner import Planner, Executor, Primitive
+        planner = Planner(self.plan_low.robot, self.plan_low.p, self.p, smooth_path=self.compute_path)
+        executor = Executor(self.robot, self.p, ctrl_mode="teleport", record=True)
+        self.__planner = Primitive(planner, executor, self.blocks_id, None, None,
+                                   self.plan_low.blocks_id, [self.plan_low.table_id],
+                                   teleport_arm=not self.compute_path, force_scale=force_scale)
+    
+    def reset(self):
+        obs = super().reset()
+        if self.use_low_level_planner:
+            self.__planner.align_at_reset()
+        return obs
+    
+    def step(self, action):
+        """
+        @gjx: copyed from ArmGoalEnv and added low-level planner
+        """
+        assert self.name is not None
+        if (action == -1).all():
+            obs = self._get_obs()
+            reward, info = self.compute_reward_and_info()
+            done = True
+            return obs, reward, done, info
+        if self.primitive:
+            assert len(action) == 7
+            assert self.n_active_object is not None
+            # if any(np.abs(action[1:]) > 1):
+            #     print(action)
+            #     raise ValueError
+            # get target position & orientation
+            # todo: let generate action & not generate action be the same
+            obj_id = int(action[0])
+            tgt_pos = torch.zeros(3)
+            tgt_orn = action[4:]
+            tgt_pos[0] = action[1]
+                        # (action[1] + 1) * (self.robot.x_workspace[1] - self.robot.x_workspace[0]) / 2 \
+                        #     + self.robot.x_workspace[0]
+            tgt_pos[1] = action[2]
+                        # (action[2] + 1) * (self.robot.y_workspace[1] - self.robot.y_workspace[0]) / 2 \
+                        #     + self.robot.y_workspace[0]
+            if self.name == "allow_rotation":
+                tgt_pos[2] = action[3] # (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
+            elif self.name == "default":
+                tgt_pos[2] = action[3] # (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
+            else:
+                raise NotImplementedError
+            tgt_orn = tgt_orn * np.pi / 2.
+            tgt_orn = p.getQuaternionFromEuler(tgt_orn)
+
+            stable = True
+            # if self._robot_feasible(self.blocks_id[obj_id], tgt_pos, tgt_orn):
+            if obj_id >= 0:
+                if not self.use_low_level_planner:
+                    # get current position & orientation of the target object
+                    # cur_pos, cur_orn = self.p.getBasePositionAndOrientation(self.blocks_id[obj_id])
+                    # self.robot.control(
+                    #     tgt_pos, tgt_orn,
+                    #     (self.robot.finger_range[0] + self.robot.finger_range[1]) / 2,
+                    #     relative=False, teleport=True,
+                    # )
+                    # state_id = self.p.saveState()
+                    self.p.resetBasePositionAndOrientation(self.blocks_id[obj_id], tgt_pos, tgt_orn)
+                    #fig, ax = plt.subplots(1, 1)
+                    # if os.path.exists("tmp_roll"):
+                    #     shutil.rmtree("tmp_roll")
+                    #os.makedirs("tmp_roll", exist_ok=True)
+                    # img = self.render(mode="rgb_array")
+                    # ax.cla()
+                    # ax.imshow(img)
+                    # plt.imsave("tmp_roll/tmp%d.png" % self.frame_count, img)
+                    # self.frame_count += 1
+                    # print(self.frame_count)
+                    for frame_count in range(40):
+                        self.p.stepSimulation()
+                        # self.frame_count += 1
+                    # judge whether stable
+                    cur_pos = self._get_achieved_goal()[0]
+                    for _ in range(10):
+                        # img = self.render(mode="rgb_array")
+                        # ax.cla()
+                        # ax.imshow(img)
+                        # plt.imsave("tmp_roll/tmp%d.png" % self.frame_count, img)
+                        self.p.stepSimulation()
+                        # self.frame_count += 1
+                    #img = self.render(mode="rgb_array")
+                    #ax.cla()
+                    #ax.imshow(img)
+                    #plt.imsave("tmp_roll/tmp%d.png" % self.frame_count, img)
+                    #self.frame_count += 1
+                    # print(self.frame_count)
+                    future_pos = self._get_achieved_goal()[0]
+                    stable = not any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3)
+                else:
+                    print("[DEBUG] low level moving")
+                    _state = self.p.saveState()
+                    res, path = self.__planner.move_one_object(obj_id, tgt_pos, tgt_orn)
+                    if res == 0:
+                        start_pos_and_rot = [self.p.getBasePositionAndOrientation(self.blocks_id[i]) for i in range(self.n_object)]
+                        start_pos, start_rot = zip(*start_pos_and_rot)
+                        start_pos, start_rot = map(lambda x: np.asarray(x), [start_pos, start_rot])
+                        stable_pos, stable_rot = start_pos, start_rot
+                    else:
+                        # If low-level fails, do no-op
+                        self.p.restoreState(stateId=_state)
+                        joint_states = self.p.getJointStates(self.robot._robot, self.robot.motorIndices)
+                        servo_angles = [item[0] for item in joint_states]
+                        self.p.setJointMotorControlArray(self.robot._robot, self.robot.motorIndices, self.p.POSITION_CONTROL, servo_angles)
+                        self.p.stepSimulation()
+                    self.p.removeState(_state)
+
+            obs = self._get_obs()
+            reward, info = self.compute_reward_and_info()
+            done = False
+            if not stable:
+                reward -= 0.001
+            #     # self.p.removeState(state_id)
+            return obs, reward, done, info
+    
+    def _sim_until_stable(self):
+        count = 0
+        while count < 10 and np.linalg.norm(np.concatenate(
+                [self.p.getBaseVelocity(self.blocks_id[i])[0]
+                 for i in range(len(self.blocks_id))])) > 1e-3:
+            for _ in range(50):
+                self.p.stepSimulation()
+            count += 1
+        print(f"Sim until stable: {count} rounds")
+
+
 def _create_block(physics_client, halfExtents, pos, orn, mass=0.2, rgba=None, vel=None, vela=None):
     col_id = physics_client.createCollisionShape(physics_client.GEOM_BOX, halfExtents=halfExtents)
     vis_id = physics_client.createVisualShape(physics_client.GEOM_BOX, halfExtents=halfExtents)
@@ -2248,25 +2429,39 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     env = ArmStack(
-        n_object=6, reward_type="sparse", action_dim=7, generate_data=True, primitive=True,
-        n_to_stack=np.array([[1, 2, 3]]), name="allow_rotation"
+        n_object=3, reward_type="sparse", action_dim=7, generate_data=True, primitive=True,
+        n_to_stack=np.array([[1, 2, 3]]), name="allow_rotation", robot="panda"
     )
     print("created env")
     obs = env.reset()
     print("reset obs", obs)
     fig, ax = plt.subplots(1, 1)
-    os.makedirs("tmp", exist_ok=True)
+    os.makedirs("tmp1", exist_ok=True)
+
+    import pickle
+
+    # history data
+    _actions_history = []
+    _states_history = []
+
     for i in range(10):
         img = env.render(mode="rgb_array")
         #ax.cla()
         #ax.imshow(img)
-        plt.imsave("tmp/tmp%d.png" % i, img)
+        plt.imsave("tmp1/tmp%d.png" % i, img)
 
         action = env.act()
         action = action.squeeze(dim=0)
+
+        _actions_history.append(action)
+        _states_history.append(env.get_state())
+        print("[DEBUG] state", _states_history[-1])
+        
         # action = env.action_space.sample()
         # action[4:7] = [0, 0, 0.5]
-        print(action)
+        print("[DEBUG] action", action)
         #action = [0, 0, 0, 0, 0, 0, 0.001]
         obs, reward, done, info = env.step(action)
+    _states_history.append(env.get_state())
+    pickle.dump({'actions': _actions_history, 'states': _states_history}, open('test_demo_random.pkl', 'wb'))
     print(obs)

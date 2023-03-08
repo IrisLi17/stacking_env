@@ -1,7 +1,7 @@
 import os, time
 import math
 import numpy as np
-from bullet_envs.env.bullet_rotations import quat2euler, quat_mul, euler2quat, quat2mat, is_rotation_mat, mat2quat
+from bullet_envs.env.bullet_rotations import quat2euler, quat_mul, euler2quat, quat2mat, is_rotation_mat, mat2quat, quat_diff
 
 
 KINOVA_MODEL_DIR = os.path.join(os.path.dirname(__file__), 'kinova_description', 'urdf')
@@ -473,7 +473,15 @@ class UR2f85Robot(ArmRobot):
                                           useOrientation, useNullSpace, topdown,
                                           np.array([0., 1., 0.]), init_gripper_quat)
         self.collision_pairs = set()
-        
+
+        # TODO@gjx: change the right configuration for UR robot
+        self.x_workspace = (self.base_pos[0] + 0.25, self.base_pos[0] + 0.6)
+        self.y_workspace = (self.base_pos[1] - 0.25, self.base_pos[1] + 0.25)
+        self.z_workspace = (self.base_pos[2], self.base_pos[2] + 0.4)
+        self.eef_index = 11
+        self.finger_drive_index = 9
+        self.num_substeps = 20
+        self.init_eef_height = 0.05
 
     def _post_gripper(self):
         self.gripper_joint_inds = [11, 13, 15, 16, 18, 20]
@@ -500,6 +508,18 @@ class UR2f85Robot(ArmRobot):
         gripper_pos, gripper_vel, *_ = zip(*gripper_states)
         return np.array(end_effector_pos), np.array(end_effector_orn), np.array(end_effector_vl), \
                np.array(gripper_pos), np.array(gripper_vel)
+
+    #TODO@gjx: whether get obs old from other robot is fine?
+    def get_obs_old(self):
+        eef_state = self.p.getLinkState(self.id, self.eef_index, computeLinkVelocity=1, computeForwardKinematics=1)
+        eef_pos, eef_orn, _, _, _, _, eef_vl, eef_va = eef_state
+        eef_orn = quat_diff(eef_orn, np.array([1, 0, 0, 0]))
+        eef_euler = self.p.getEulerFromQuaternion(eef_orn)
+        eef_pos, eef_euler, eef_vl, eef_va = map(np.asarray, [eef_pos, eef_euler, eef_vl, eef_va])
+        finger_position, finger_vel, *_ = self.p.getJointState(self.id, self.finger_drive_index)
+        eef_vl *= 1. / 240 * self.num_substeps
+        finger_vel *= 1. / 240 * self.num_substeps
+        return np.concatenate([eef_pos, eef_euler, eef_vl, [finger_position, finger_vel]])
 
     def compute_ik_information(self):
         """ Finds the values for the IK solver. """
@@ -563,10 +583,18 @@ class UR2f85Robot(ArmRobot):
         info = {'is_success': n_solutions > 0}
         return joint_pose, info
 
+    def set_state(self, state_dict):
+        print("[DEBUG]", self.p.getNumJoints(self.id))
+        for j in range(self.p.getNumJoints(self.id)):
+            self.p.resetJointState(self.id, j, state_dict["qpos"][j], state_dict["qvel"][j])
+    
+    def get_eef_position(self):
+        eef_pos, *_ = self.p.getLinkState(self.id, self.eef_index)
+        return np.array(eef_pos)
 
 class XArm7Robot(ArmRobot):
     def __init__(self, physics_client, urdfrootpath=XARM_MODEL_DIR, init_qpos=None,
-                 init_end_effector_pos=(1.0, 0.3, 0.6),
+                 init_end_effector_pos=(0.3, -0.1, 0.6),
                  useOrientation=True, useNullSpace=True):
         if init_qpos is None:
             # init_qpos = [0, 0.0, 0.0786759, 0.0, 1.54692674, 0.0, 1.46825087, 0.,
@@ -580,15 +608,30 @@ class XArm7Robot(ArmRobot):
         self.kin_free4 = ikfastpy_free4.PyKinematics()
         self.kin_free0 = ikfastpy_free0.PyKinematics()
         init_gripper_quat = mat2quat(np.reshape(self.kin_free4.forward([0.] * self.kin_free4.getDOF()), [3, 4])[:, :3])
+        # topdown_quat = init_gripper_quat
         topdown_quat = quat_mul(np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]), init_gripper_quat)
-        topdown = quat2euler(topdown_quat)
+        topdown_quat = quat_mul(np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]), topdown_quat)
+        topdown = quat2euler(topdown_quat) # [pi, 0., pi/2]
         super(XArm7Robot, self).__init__(physics_client, "xarm7_with_gripper.urdf", urdfrootpath, init_qpos,
-                                         [0.7, 0.6, 0.005], [0., 0., 0., 1.], init_end_effector_pos,
+                                         [0., 0.2, 0.005], [0., 0., 0., 1.], init_end_effector_pos,
                                          topdown, end_effector_index, reset_finger_joints,
                                          useOrientation, useNullSpace, topdown,
                                          np.array([0., 0., -1.]), init_gripper_quat)
         # physics_client.resetBasePositionAndOrientation(self._robot, [0.7, -1.0, 0.005], [0., 0., 0., 1.])
         self.collision_pairs = set()
+
+        # TODO@gjx: change the right configuration for UR robot
+        self.x_workspace = (self.base_pos[0] + 0.25, self.base_pos[0] + 0.6)
+        self.y_workspace = (self.base_pos[1] - 0.25, self.base_pos[1] + 0.25)
+        self.z_workspace = (self.base_pos[2], self.base_pos[2] + 0.4)
+        self.eef_index = 8 # 11
+        # self.finger_drive_index = 9
+        self.num_substeps = 20
+        self.init_eef_height = 0.05
+    
+    @property
+    def id(self):
+        return self._robot
 
     def _post_gripper(self):
         self.gripper_joint_inds = [10, 11, 12, 13, 14, 15]
@@ -628,6 +671,37 @@ class XArm7Robot(ArmRobot):
             n_solutions = len(joint_poses)
         return np.array(joint_poses), {'is_success': n_solutions > 0}
 
+    #TODO@gjx: whether get obs old from other robot is fine?
+    def get_obs_old(self):
+        eef_state = self.p.getLinkState(self.id, self.eef_index, computeLinkVelocity=1, computeForwardKinematics=1)
+        eef_pos, eef_orn, _, _, _, _, eef_vl, eef_va = eef_state
+        eef_orn = quat_diff(eef_orn, np.array([1, 0, 0, 0]))
+        eef_euler = self.p.getEulerFromQuaternion(eef_orn)
+        eef_pos, eef_euler, eef_vl, eef_va = map(np.asarray, [eef_pos, eef_euler, eef_vl, eef_va])
+        gripper_states = self.p.getJointStates(self._robot, self.gripper_joint_inds)
+        gripper_pos, gripper_vel, *_ = zip(*gripper_states)
+        gripper_pos, gripper_vel = np.asarray(gripper_pos), np.asarray(gripper_vel)
+        eef_vl *= 1. / 240 * self.num_substeps
+        print("[DEBUG]", eef_pos.shape, eef_euler.shape, eef_vl.shape, gripper_vel.shape, gripper_pos.shape)
+        gripper_vel *=  1. / 240 * self.num_substeps
+        return np.concatenate([eef_pos, eef_euler, eef_vl, gripper_pos, gripper_vel])
+
+    def set_state(self, state_dict):
+        print("[DEBUG]", self.p.getNumJoints(self.id))
+        for j in range(self.p.getNumJoints(self.id)):
+            self.p.resetJointState(self.id, j, state_dict["qpos"][j], state_dict["qvel"][j])
+    
+    def get_eef_position(self):
+        eef_pos, *_ = self.p.getLinkState(self.id, self.eef_index)
+        return np.array(eef_pos)
+    
+    def control(self, *args, **kwargs):
+        pass
+    
+    def get_state(self):
+        joint_states = self.p.getJointStates(self.id, list(range(self.p.getNumJoints(self.id))))
+        joint_pos, joint_vel, *_ = zip(*joint_states)
+        return dict(qpos=np.array(joint_pos), qvel=np.array(joint_vel))
 
 if __name__ == "__main__":
     import pybullet as p

@@ -1,4 +1,6 @@
 import numpy as np
+import bullet_envs.env.rotations_c.rotations as rotations
+import pybullet as p
 
 
 def quat2mat(q):
@@ -103,3 +105,71 @@ def quat_diff(q1, q2):
     if q_diff[3] < 0:
         q_diff *= -1
     return q_diff
+
+def quat2euler(q):
+    '''
+    :param q: [qi, qj, qk, qr]
+    :return: [alpha, beta, gamma] = [roll, pitch, yaw]
+    '''
+    return np.asarray(p.getEulerFromQuaternion(q))
+    # # TODO: deal with singularities
+    # qi, qj, qk, qr = q[0], q[1], q[2], q[3]
+    # assert abs(qi ** 2 + qj ** 2 + qk ** 2 + qr ** 2 - 1) < 1e-5
+    #
+    # sqx = qi * qi
+    # sqy = qj * qj
+    # sqz = qk * qk
+    # squ = qr * qr
+    # sarg = -2 * (qi * qk - qr * qj)
+    #
+    # # If the pitch angle is PI / 2 or -PI / 2, there are infinite many solutions. We set roll = 0
+    # if sarg <= -0.99999:
+    #     roll = 0
+    #     pitch = -0.5 * np.pi
+    #     yaw = 2 * np.arctan2(qi, -qj)
+    # elif sarg >= 0.99999:
+    #     roll = 0
+    #     pitch = 0.5 * np.pi
+    #     yaw = 2 * np.arctan2(-qi, qj)
+    # else:
+    #     roll = np.arctan2(2 * (qj * qk + qr * qi), squ - sqx - sqy + sqz)
+    #     pitch = np.arcsin(sarg)
+    #     yaw = np.arctan2(2 * (qi * qj + qr * qk), squ + sqx - sqy - sqz)
+    # return np.array([roll, pitch, yaw])
+
+
+def euler2quat(euler):
+    return np.asarray(p.getQuaternionFromEuler(euler))
+    # alpha, beta, gamma = euler[0], euler[1], euler[2]
+    # qi = np.sin(alpha / 2) * np.cos(beta / 2) * np.cos(gamma / 2) - np.cos(alpha / 2) * np.sin(beta / 2) * np.sin(gamma / 2)
+    # qj = np.cos(alpha / 2) * np.sin(beta / 2) * np.cos(gamma / 2) + np.sin(alpha / 2) * np.cos(beta / 2) * np.sin(gamma / 2)
+    # qk = np.cos(alpha / 2) * np.cos(beta / 2) * np.sin(gamma / 2) - np.sin(alpha / 2) * np.sin(beta / 2) * np.cos(gamma / 2)
+    # qr = np.cos(alpha / 2) * np.cos(beta / 2) * np.cos(gamma / 2) + np.sin(alpha / 2) * np.sin(beta / 2) * np.sin(gamma / 2)
+    # assert abs(qi ** 2 + qj ** 2 + qk ** 2 + qr ** 2 - 1) < 1e-5
+    # return np.array([qi, qj, qk, qr])
+
+def is_rotation_mat(mat):
+    if np.all(np.abs(mat.transpose() @ mat - np.eye(3)) < 1e-4) and np.all(np.abs(mat @ mat.transpose() - np.eye(3)) < 1e-4):
+        return True
+    print(mat.transpose() @ mat, mat @ mat.transpose())
+    return False
+
+
+def quat_rot_vec_py(q, v0):
+    if not isinstance(q, np.ndarray):
+        q = np.array(q)
+    v0_norm = np.linalg.norm(v0)
+    q_v0 = np.array([v0[0], v0[1], v0[2], 0]) / v0_norm
+    q_v = quat_mul_py(q, quat_mul_py(q_v0, quat_conjugate(q)))
+    v = q_v[:-1] * v0_norm
+    return v
+
+
+def quat_rot_vec(q, v0):
+    if not isinstance(q, np.ndarray):
+        q = np.array(q)
+    v0_norm = np.linalg.norm(v0)
+    q_v0 = np.array([v0[0], v0[1], v0[2], 0]) / v0_norm
+    q_v = quat_mul(q, quat_mul(q_v0, quat_conjugate(q)))
+    v = q_v[:-1] * v0_norm
+    return v
