@@ -311,7 +311,6 @@ class Planner(object):
         t1 = time.time()
         assert ((armpose1.body == armpose2.body) and (
                 armpose1.joints == armpose2.joints))
-        # print("[DEBUG] path planner", teleport)
         if teleport:
             path = [armpose1.conf, armpose2.conf]
         else:
@@ -327,8 +326,6 @@ class Planner(object):
                                           smooth=20 if self.smooth_path else None,
                                           **kwargs
                                           )
-            if path is not None:
-                print("[DEBUG] generated path", len(path))
             if path is None:
                 return None
         return path
@@ -476,8 +473,7 @@ class Planner(object):
         check_collision_pairs = get_check_pairs()
         if self.verbose > 1:
             print("get check_collision_pairs time", time.time() - t1)
-        print("[DEBUG] check_collision_pairs", check_collision_pairs)
-
+        
         def collision_fn(q):
             start_time = time.time()
             t1 = time.time()
@@ -507,25 +503,15 @@ class Planner(object):
                 all_contact_set = set()
             check_collision_set = set(check_collision_pairs)
             found_collision_pairs = all_contact_set.intersection(check_collision_set)
-            print("[DEBUG] check collision", found_collision_pairs, get_body_pos_and_orn(5, self.p)[0])
-            for collision_pair in found_collision_pairs:
-                (bodyA, linkA), (bodyB, linkB) = collision_pair
-                for contact_point in all_contact_points:
-                    # print(len(contact_point), contact_point)
-                    _, _bodyA, _bodyB, _linkA, _linkB, _posA, _posB, _normalB, _dis, _force, *_ = contact_point
-                    if (_bodyA == bodyA and _linkA == linkA and _bodyB == bodyB and _linkB == linkB) or \
-                        (_bodyA == bodyB and _linkA == linkB and _bodyB == bodyA and _linkB == linkA):
-                        print(f"[DEBUG] for collision {collision_pair}: dis={_dis},  contactA={_posA}, contactB={_posB}, posA={get_body_pos_and_orn(bodyA, self.p)}, posB={get_body_pos_and_orn(bodyB, self.p)}")
-                        print(f"          ", self.p.getCollisionShapeData(bodyA, linkA), self.p.getCollisionShapeData(bodyB, linkB))
-            print("[DEBUG] check collision", all_contact_set.intersection(check_collision_set))
             is_collision = not all_contact_set.isdisjoint(check_collision_set)
-            if is_collision:
-                self._collision_id += 1
-                print("[DEBUG] collision idx", self._collision_id, get_body_pos_and_orn(5, self.p))
-                pose = ArmPose(self.robot_id, conf=list(q), wrapped_p=self.p, joints=self.moving_joints)
-                pose.assign(self.p)
-                img = get_image(self.p, 500, 500)
-                plt.imsave(f"video_tmp/debug_collision_{self._collision_id}.png", img)
+            if self.verbose > 1:
+                if is_collision:
+                    self._collision_id += 1
+                    print("[DEBUG] collision idx", self._collision_id, get_body_pos_and_orn(5, self.p))
+                    pose = ArmPose(self.robot_id, conf=list(q), wrapped_p=self.p, joints=self.moving_joints)
+                    pose.assign(self.p)
+                    img = get_image(self.p, 500, 500)
+                    plt.imsave(f"video_tmp/debug_collision_{self._collision_id}.png", img)
             if self.verbose > 1:
                 if is_collision:
                     print(all_contact_set.intersection(check_collision_set))
@@ -583,14 +569,6 @@ class Executor(object):
                 if self.record:
                     img = get_image(self.p, 500, 500)
                     plt.imsave(f"video_tmp/tmpimg_{self.img_idx}{current_state}.png", img)
-                    '''all_contact_points = self.p.getContactPoints()
-                    if len(all_contact_points):
-                        _, bodyA, bodyB, linkA, linkB, *_ = zip(*all_contact_points)
-                        set1 = set(zip(zip(bodyA, linkA), zip(bodyB, linkB)))
-                        set2 = set(zip(zip(bodyB, linkB), zip(bodyA, linkA)))
-                        all_contact_set = set.union(set1, set2)
-                        print("[DEBUG] object 1 contact points:", [(x, y) for x, y in all_contact_set if x[0] == 3 or y[0] == 3])'''
-                    # print("[DEBUG] robot state:", f"tmpimg_{self.img_idx}{current_state}.png", self.robot.get_state(), self.robot.get_end_effector_pos(), self.robot.get_end_effector_orn(as_type="quat"))
                     self.img_idx += 1
                 if early_stop and (self.robot.get_end_effector_pos()[2] > 0.25 or quat_rot_vec(self.robot.get_end_effector_orn(as_type="quat"), np.array([0., 0., 1.]))[2] < -0.9):
                     arm_path.path = arm_path.path[:p_idx + 1]
@@ -742,12 +720,7 @@ class Primitive(object):
         for i in range(len(exec_id_and_pos)):
             self.plan_body_blocks.append(
                 ids[np.argmin([np.linalg.norm(item - exec_id_and_pos[i][1]) for item in plan_pos])])
-            # print(f"[DEBUG] align block {i} to {self.plan_body_blocks[-1]} with distance {np.min([np.linalg.norm(item - exec_id_and_pos[i][1]) for item in plan_pos])}.")
-        # Sync collision shape
-        '''for i in range(len(exec_id_and_pos)):
-            scaling = np.array(self.exec_p.getCollisionShapeData(exec_id_and_pos[i][0], -1)[0][3]) / np.array([0.05, 0.2, 0.05])
-            self.plan_p.unsupportedChangeScaling(self.plan_body_blocks[i], scaling)'''
-
+            
     def prob_vec_from_quat(self, quat):
         return quat_rot_vec(quat_diff(quat, euler2quat(self.topdown_euler)), np.array([0., 0., -1]))
 
@@ -837,13 +810,10 @@ class Primitive(object):
         # approach_q = sorted(approach_q, key=lambda x: np.linalg.norm(x - cur_q))
         # No memory leakage above
         t1 = time.time()
-        # print("[DEBUG] approach_q={}, final_q={}, q_finger={}, disabled_pairs={}".format(approach_q, final_q, q_finger, disabled_pairs))
-        print("[DEBUG] before check collision", self.planner.fixed)
         is_collision = self.planner.check_qpos_collision(approach_q, q_finger, disabled_collisions=disabled_pairs)
         check_collision_time = time.time() - t1
         if self.verbose > 1:
             print("check collision time", time.time() - t1)
-        print("[DEBUG]  collision", is_collision)
         if np.all(is_collision):
             self.plan_p.removeState(plan_state_id)
             return False, END_IN_COLLISION, None, None
@@ -872,7 +842,6 @@ class Primitive(object):
                     res[2].path = [res[2].path[0], res[2].path[-1]]
                 res[2].grasp_config = (base_gripper_quat[q_idx], tgt_gripper_quat[q_idx], tgt_obj_offset[q_idx])
                 valid_paths.append(res[2])
-                print(f"[DEBUG] valid approach_q: idx={q_idx}, q={q}, path_length={len(res[2].path)}", self.teleport_arm, len(res[2].path))
                 break
         self.plan_p.removeState(plan_state_id)
         planning_time = time.time() - t1
@@ -901,7 +870,6 @@ class Primitive(object):
                     print("planning_time", planning_time)
                     print("execution time", execution_time)
                     print("Summary: fetch time", time.time() - start_time)
-                print("[DEBUG] fetch object successfully")
                 return True, SUCCESS, armpath.path, dict(grasp_config=armpath.grasp_config)
             # else:
             #     self.exec_p.restoreState(stateId=old_state)
@@ -1010,14 +978,12 @@ class Primitive(object):
         valid_paths = []
 
         t1 = time.time()
-        print("[DEBUG] change pose. check collision.", self.plan_body_blocks, approach_q[0].shape)
         is_collision = self.planner.check_qpos_collision(approach_q, q_finger, grasp,
                                                          disabled_collisions=set.union(disabled_inter_pairs,
                                                                                        disabled_intra_pairs,
                                                                                        disabled_table_tgt_pair),
                                                          start_disabled_collisions=start_disabled)
         check_collision_time = time.time() - t1
-        print("[DEBUG] change pose. is_collision", is_collision)
         if self.verbose > 1:
             print("is collision", is_collision)
             print("check collision time", time.time() - t1)
@@ -1039,8 +1005,6 @@ class Primitive(object):
                     res[2].path = [res[2].path[0], res[2].path[-1]]
                 valid_paths.append(res[2])
                 break
-        print("[DEBUG] change pose. finish motion plan")
-        print("[DEBUG] block id and table id", self.plan_body_blocks, self.body_tables)
         planning_time = time.time() - t1
         if self.verbose > 1:
             print("change pose, planning time", time.time() - t1)
@@ -1090,7 +1054,6 @@ class Primitive(object):
         plan_state_id = self.plan_p.saveState()
         sync_env_time = time.time() - t1
         t1 = time.time()
-        print("[DEBUG] change pose. grasp config:", grasp_config)
         if grasp_config is None:
             grasp_configs = copy.deepcopy(self.grasp_configs)
         else:
@@ -1172,19 +1135,9 @@ class Primitive(object):
                 self.exec_p.applyExternalForce(self.exec_body_blocks[tgt_block], -1,
                                                forceObj=np.random.normal(0., self.force_scale, size=(3,)),
                                                posObj=(0, 0, 0), flags=self.exec_p.LINK_FRAME)
-                def check_object1_collision():
-                    all_contact_points = self.exec_p.getContactPoints()
-                    if len(all_contact_points):
-                        _, bodyA, bodyB, linkA, linkB, *_ = zip(*all_contact_points)
-                        set1 = set(zip(zip(bodyA, linkA), zip(bodyB, linkB)))
-                        set2 = set(zip(zip(bodyB, linkB), zip(bodyA, linkA)))
-                        all_contact_set = set.union(set1, set2)
-                        print("[DEBUG] object 1 contact points:", [(x, y) for x, y in all_contact_set if x[0] == 3 or y[0] == 3])
-                # check_object1_collision()
                 for _ in range(10):
                     self.exec_p.stepSimulation()
                     print("After {} simulation steps".format(_ + 1))
-                    # check_object1_collision()
                 self._sim_until_stable()
                 if self.verbose > 1:
                     print("sim until stable time", time.time() - t1)
