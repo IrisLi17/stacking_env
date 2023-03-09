@@ -487,9 +487,6 @@ class Planner(object):
             # print("attachments", attachments)
             for attachment in attachments:
                 attachment.assign()
-            self.p.stepSimulation()
-            img = get_image(self.p, 500, 500)
-            plt.imsave(f"video_tmp/debug_collision_{self._collision_id + 1}_.png", img)
             self.p.performCollisionDetection()
             if self.verbose > 2:
                 print("in collision fn, env time", time.time() - t1, "n attachment", len(attachments))
