@@ -30,7 +30,7 @@ COLOR = [[1.0, 0, 0], [1, 1, 0], [0.2, 0.8, 0.8], [0.8, 0.2, 0.8], [0.2, 0.8, 0.
 FRAMECOUNT = 0
 
 class ArmGoalEnv(gym.Env):
-    def __init__(self, robot="xarm", seed=None, action_dim=4, generate_data=None, use_gpu_render=True):
+    def __init__(self, robot="panda", seed=None, action_dim=4, generate_data=None, use_gpu_render=True):
         self.seed(seed)
         self.use_gpu_render = use_gpu_render
 
@@ -682,7 +682,7 @@ class ArmGoalEnv(gym.Env):
 
 
 class ArmPickAndPlace(ArmGoalEnv):
-    def __init__(self, robot="xarm", seed=None, n_object=6, reward_type="sparse", primitive=False, action_dim=4, generate_data=False, use_gpu_render=True, invisible_robot=True):
+    def __init__(self, robot="panda", seed=None, n_object=6, reward_type="sparse", primitive=False, action_dim=4, generate_data=False, use_gpu_render=True, invisible_robot=True):
         self.env_id = "BulletPickAndPlace-v1"
         self.name = "allow_rotation"
         self.generate_data = generate_data
