@@ -690,14 +690,6 @@ class Primitive(object):
         self.grasp_configs = []
         gripper_orn = euler2quat(self.topdown_euler)
 
-        # grasp the two ends of the block
-        _rot = np.concatenate([np.sin(3 * np.pi / 2 / 2) * np.array([0., 1., 0.]), [np.cos(3 * np.pi / 2 / 2)]])
-        candidate_gripper_orn = quat_mul(_rot, gripper_orn)
-        self.grasp_configs.append((candidate_gripper_orn, -0.04))
-        _rot = np.concatenate([np.sin(-3 * np.pi / 2 / 2) * np.array([0., 1., 0.]), [np.cos(-3 * np.pi / 2 / 2)]])
-        candidate_gripper_orn = quat_mul(_rot, gripper_orn)
-        self.grasp_configs.append((candidate_gripper_orn, 0.04))
-
         # grasp along the long axis
         block_longaxis = np.array([1., 0., 0.])
         for i in range(4):
@@ -706,6 +698,22 @@ class Primitive(object):
             for obj_offset in self.object_offsets:
                 self.grasp_configs.append((candidate_gripper_orn, obj_offset))
                 pass
+        
+        # grasp the two ends of the block
+        _rot = np.concatenate([np.sin(3 * np.pi / 2 / 2) * np.array([0., 1., 0.]), [np.cos(3 * np.pi / 2 / 2)]])
+        _gripper_orn = quat_mul(_rot, gripper_orn)
+        for i in range(4):
+            _rot = np.concatenate([np.sin(i * np.pi / 2 / 2) * block_longaxis, [np.cos(i * np.pi / 2 / 2)]])
+            candidate_gripper_orn = quat_mul(_rot, _gripper_orn)
+            self.grasp_configs.append((candidate_gripper_orn, -0.04))
+        
+        _rot = np.concatenate([np.sin(-3 * np.pi / 2 / 2) * np.array([0., 1., 0.]), [np.cos(-3 * np.pi / 2 / 2)]])
+        _gripper_orn = quat_mul(_rot, gripper_orn)
+        for i in range(4):
+            _rot = np.concatenate([np.sin(i * np.pi / 2 / 2) * block_longaxis, [np.cos(i * np.pi / 2 / 2)]])
+            candidate_gripper_orn = quat_mul(_rot, _gripper_orn)
+            self.grasp_configs.append((candidate_gripper_orn, 0.04))
+
 
     def align_at_reset(self):
         sync_plan_with_exec(self.plan_p, self.exec_p)
