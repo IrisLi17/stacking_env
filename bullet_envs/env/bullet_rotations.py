@@ -92,8 +92,8 @@ def quat_diff(q1, q2):
     :param q2:
     :return:
     '''
-    assert np.all(abs(np.linalg.norm(q1) - 1) < 1e-5)
-    assert np.all(abs(np.linalg.norm(q2) - 1) < 1e-5)
+    assert (np.all(abs(np.linalg.norm(q1) - 1) < 1e-5)), (np.linalg.norm(q1), q1)
+    assert (np.all(abs(np.linalg.norm(q2) - 1) < 1e-5)), (np.linalg.norm(q2), q2)
     q1 = np.array(q1)
     q2 = np.array(q2)
     if q2[3] < 0:

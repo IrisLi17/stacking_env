@@ -27,7 +27,7 @@ def compute_action(state, next_state):
     orientation = nxt_pos[block_id][3:]
     euler = np.asarray(p.getEulerFromQuaternion(orientation)) / (np.pi / 2)
     action = np.concatenate([[block_id], position, euler])
-    action[3] += 0.001
+    action[3] += 0.01
     print("[DEBUG] pos_err={}".format(pos_err))
     return action
 
@@ -70,6 +70,7 @@ def test_armstack_low(traj_path, length=None, n_object=None):
     # _states_history[1]['objects']['qpos'][:, 2] += 0.05
 
     _states_history = list(reversed(_states_history))
+    _states_history = _states_history[:]
 
     fig, ax = plt.subplots(1, 1)
     os.makedirs("debug_tmp", exist_ok=True)
