@@ -153,15 +153,16 @@ class ArmPose(object):
 
 
 class ArmPath(object):
-    def __init__(self, body, path, wrapped_p):
+    def __init__(self, body, path, wrapped_p, obj_offset=None):
         self.wrapped_p = wrapped_p
         self.body = body
         assert isinstance(path, list)
         self.path = path
+        self.obj_offset = obj_offset
 
 
 class Attachment(object):
-    def __init__(self, body, parent_body, parent_link, rel_xyz, rel_quat, topdown_quat, wrapped_p: PhysClientWrapper):
+    def __init__(self, body, parent_body, parent_link, rel_xyz, rel_quat, topdown_quat, wrapped_p: PhysClientWrapper, obj_offset=None):
         self.wrapped_p = wrapped_p
         self.child = body
         self.parent_body = parent_body
@@ -169,6 +170,7 @@ class Attachment(object):
         self.rel_xyz = rel_xyz  # [0, 0, 0.01]
         self.rel_quat = rel_quat  # [0, 0, 0.707, 0.707]. child quat - parent quat
         self.topdown_quat = topdown_quat
+        self.obj_offset = obj_offset
 
     def assign(self):
         parent_state = self.wrapped_p.getLinkState(self.parent_body, self.parent_link)
@@ -177,6 +179,10 @@ class Attachment(object):
         child_xyz = np.array(quat_rot_vec(quat_diff(parent_quat, self.topdown_quat), self.rel_xyz)) + np.array(
             parent_xyz)
         child_quat = quat_mul(parent_quat, self.rel_quat)
+        if self.obj_offset:
+            # child is a block and the grasp position has a offset
+            child_longaxis = quat_rot_vec(child_quat, np.array([1., 0., 0.]))
+            child_xyz -= child_longaxis * self.obj_offset
         self.wrapped_p.resetBasePositionAndOrientation(self.child, child_xyz, child_quat)
 
 
@@ -187,9 +193,9 @@ class Grasp(object):
         self.wrapped_p = wrapped_p
         self.attachments = []
 
-    def set_attach(self, body_id, rel_quat=[0., 0., 0., 1.], rel_xyz=[0., 0., 0.01], topdown_quat=[0., 0., 0., 1.]):
+    def set_attach(self, body_id, rel_quat=[0., 0., 0., 1.], rel_xyz=[0., 0., 0.01], topdown_quat=[0., 0., 0., 1.], obj_offset=None):
         self.attachments.append(Attachment(body_id, self.robot_id, self.eef_link, rel_xyz, rel_quat,
-                                           topdown_quat, self.wrapped_p))
+                                           topdown_quat, self.wrapped_p, obj_offset=obj_offset))
 
     def clear_attach(self):
         self.attachments = []
@@ -665,7 +671,7 @@ def get_eef_orn(object_orn, topdown_euler, init_gripper_axis, init_gripper_quat)
             print(f"[DEBUG] found candidate {i}: {candidate}")
         print(f"[DEBUG] check _rot={_rot}.", gripper_axis, gripper_axis2, abs(np.dot(gripper_axis, [1., 0., 0.])), abs(np.dot(gripper_axis2, [0., 1., 0])), np.dot(gripper_axis, [0., 1., 0.]))
     print(f'[DEBUG] {len(candidates)} candidates')
-    return candidates
+    return candidates, obj_longaxis
 
 
 def get_body_pos_and_orn(body_id, p: PhysClientWrapper):
@@ -695,6 +701,7 @@ class Primitive(object):
             self.grasp_offset = -0.16
         else:
             self.grasp_offset = -0.17  # -0.17  # from point to grasp to eef link
+        self.object_offsets = [-0.04, 0., 0.04] # from which point to grasp the block. 0.04/-0.04 represents two ends of the block.
         self.verbose = verbose
         self.teleport_arm = teleport_arm
         self.force_scale = force_scale
@@ -751,29 +758,32 @@ class Primitive(object):
                                     self.plan_robot.motorIndices)[:self.plan_robot.ndof]
         # Get approach q
         block_pos, block_orn = get_body_pos_and_orn(self.plan_body_blocks[tgt_block], self.plan_p)
-        gripper_quats = get_eef_orn(block_orn, self.topdown_euler, self.init_gripper_axis, self.init_gripper_quat)
+        gripper_quats, tgt_obj_longaxis = get_eef_orn(block_orn, self.topdown_euler, self.init_gripper_axis, self.init_gripper_quat)
         get_eef_orn_time = time.time() - t1
 
         t1 = time.time()
         approach_q = []
         final_q = []
-        for gripper_quat in gripper_quats:
-            # if self.verbose > 1:
-            #     print(block_pos, gripper_quat, self.prob_vec_from_quat(gripper_quat))
-            moveable_q, info = self.planner.ik(block_pos + 1.2 * self.grasp_offset * self.prob_vec_from_quat(gripper_quat),
-                                               gripper_quat)
-            _final_q, final_info = self.planner.ik(block_pos + self.grasp_offset * self.prob_vec_from_quat(gripper_quat), gripper_quat)
-            if info["is_success"] and final_info["is_success"]:
-                L = min(len(moveable_q), len(_final_q))
-                approach_q.extend(moveable_q[:L])
-                final_q.extend(_final_q[:L])
-                # approach_q.append(moveable_q[:6])
+        tgt_obj_offset = []
+        for obj_offset in self.object_offsets:
+            for gripper_quat in gripper_quats:
+                # if self.verbose > 1:
+                #     print(block_pos, gripper_quat, self.prob_vec_from_quat(gripper_quat))
+                moveable_q, info = self.planner.ik(block_pos + 1.2 * self.grasp_offset * self.prob_vec_from_quat(gripper_quat) + tgt_obj_longaxis * obj_offset,
+                                                gripper_quat)
+                _final_q, final_info = self.planner.ik(block_pos + self.grasp_offset * self.prob_vec_from_quat(gripper_quat) + tgt_obj_longaxis * obj_offset, gripper_quat)
+                if info["is_success"] and final_info["is_success"]:
+                    L = min(len(moveable_q), len(_final_q))
+                    approach_q.extend(moveable_q[:L])
+                    final_q.extend(_final_q[:L])
+                    tgt_obj_offset.extend([obj_offset] * L)
+                    # approach_q.append(moveable_q[:6])
         ik_time = time.time() - t1
         if self.verbose > 1:
             print("ik time", ik_time)
         if not len(approach_q):
             self.plan_p.removeState(plan_state_id)
-            return False, IK_FAIL, None
+            return False, IK_FAIL, None, None
         # No memory leakage above
         print("Get", len(approach_q), "approach q", approach_q)
         for i, q in enumerate(approach_q):
@@ -805,14 +815,15 @@ class Primitive(object):
         print("[DEBUG]  collision", is_collision)
         if np.all(is_collision):
             self.plan_p.removeState(plan_state_id)
-            return False, END_IN_COLLISION, None
+            return False, END_IN_COLLISION, None, None
 
         t1 = time.time()
         approach_q = (np.array(approach_q)[~is_collision]).tolist()
         final_q = (np.array(final_q)[~is_collision]).tolist()
-        approach_and_final_q = zip(approach_q, final_q)
-        approach_and_final_q = sorted(approach_and_final_q, key=lambda x: np.linalg.norm(np.array(x[0]) - cur_q))
-        approach_q, final_q = zip(*approach_and_final_q)
+        tgt_obj_offset = (np.array(tgt_obj_offset)[~is_collision]).tolist()
+        approach_and_final_q_and_tgt_obj_offset = zip(approach_q, final_q, tgt_obj_offset)
+        approach_and_final_q_and_tgt_obj_offset = sorted(approach_and_final_q_and_tgt_obj_offset, key=lambda x: np.linalg.norm(np.array(x[0]) - cur_q))
+        approach_q, final_q, tgt_obj_offset = zip(*approach_and_final_q_and_tgt_obj_offset)
 
         for q_idx, q in enumerate(approach_q):
             res = self.planner.do_plan_motion(q, q_finger, disabled_collisions=disabled_pairs,
@@ -826,6 +837,7 @@ class Primitive(object):
                     print("path length", len(res[2].path))
                 if self.teleport_arm and len(res[2].path) > 2:
                     res[2].path = [res[2].path[0], res[2].path[-1]]
+                res[2].obj_offset = tgt_obj_offset[q_idx]
                 valid_paths.append(res[2])
                 print(f"[DEBUG] valid approach_q: idx={q_idx}, q={q}, path_length={len(res[2].path)}", self.teleport_arm, len(res[2].path))
                 break
@@ -834,7 +846,7 @@ class Primitive(object):
         if self.verbose > 1:
             print("Planning time", planning_time)
         if not len(valid_paths):
-            return False, PATH_IN_COLLISION, None
+            return False, PATH_IN_COLLISION, None, None
         # No leakage above
         # Call executor
         t1 = time.time()
@@ -857,11 +869,11 @@ class Primitive(object):
                     print("execution time", execution_time)
                     print("Summary: fetch time", time.time() - start_time)
                 print("[DEBUG] fetch object successfully")
-                return True, SUCCESS, armpath.path
+                return True, SUCCESS, armpath.path, dict(tgt_obj_offset=armpath.obj_offset)
             # else:
             #     self.exec_p.restoreState(stateId=old_state)
         # self.exec_p.removeState(old_state)
-        return False, EXECUTION_FAIL, None
+        return False, EXECUTION_FAIL, None, None
 
     def _close_finger(self, tgt_block):
         if self.teleport_arm:
@@ -920,7 +932,7 @@ class Primitive(object):
                 res.append(body)
         return res
 
-    def _change_pose(self, tgt_block, tgt_pos, tgt_orn, abstract_grasp=True):
+    def _change_pose(self, tgt_block, tgt_pos, tgt_orn, tgt_obj_offset, abstract_grasp=True):
         start_time = time.time()
         tgt_pos[2] = np.maximum(tgt_pos[2], 0.045)
         # for vertical blocks, force gripper height
@@ -935,13 +947,13 @@ class Primitive(object):
         plan_state_id = self.plan_p.saveState()
         sync_env_time = time.time() - t1
         t1 = time.time()
-        gripper_quats = get_eef_orn(tgt_orn, self.topdown_euler, self.init_gripper_axis, self.init_gripper_quat)
+        gripper_quats, tgt_obj_longaxis = get_eef_orn(tgt_orn, self.topdown_euler, self.init_gripper_axis, self.init_gripper_quat)
         get_eef_orn_time = time.time() - t1
         # print("in change pos, gripper quats", gripper_quats)
         t1 = time.time()
         approach_q = []
         for gripper_quat in gripper_quats:
-            moveable_q, info = self.planner.ik(tgt_pos + self.grasp_offset * self.prob_vec_from_quat(gripper_quat),
+            moveable_q, info = self.planner.ik(tgt_pos + self.grasp_offset * self.prob_vec_from_quat(gripper_quat) + tgt_obj_longaxis * tgt_obj_offset,
                                                gripper_quat)
             if info["is_success"]:
                 approach_q.extend(moveable_q)
@@ -966,7 +978,7 @@ class Primitive(object):
         rel_quat = quat_diff(np.array([0., 0., 0., 1.]), euler2quat(self.topdown_euler))
         rel_xyz = [0., 0., self.grasp_offset + 0.003]
         grasp.set_attach(self.plan_body_blocks[tgt_block], rel_quat=rel_quat,
-                         topdown_quat=euler2quat(self.topdown_euler), rel_xyz=rel_xyz)
+                         topdown_quat=euler2quat(self.topdown_euler), rel_xyz=rel_xyz, obj_offset=tgt_obj_offset)
         grasp_time = time.time() - t1
         obstacles = self.planner.fixed.copy()
         obstacles.remove(self.plan_body_blocks[tgt_block])
@@ -1045,7 +1057,7 @@ class Primitive(object):
         if abstract_grasp:
             exec_attachments = [
                 Attachment(self.exec_body_blocks[tgt_block], self.plan_robot._robot, self.plan_robot.end_effector_index,
-                           rel_xyz, rel_quat, euler2quat(self.topdown_euler), self.exec_p)]
+                           rel_xyz, rel_quat, euler2quat(self.topdown_euler), self.exec_p, obj_offset=tgt_obj_offset)]
         else:
             exec_attachments = []
         assert len(valid_paths) == 1
@@ -1315,6 +1327,8 @@ class Primitive(object):
             return 10 * PHASE_FETCH + res[1], None
         else:
             path["fetch_object"] = res[2]
+        tgt_obj_offset = res[3]['tgt_obj_offset']
+        print("[DEBUG] tgt_obj_offset is", tgt_obj_offset, flush=True)
         print("[DEBUG] try to close finger")
         t1 = time.time()
         res = self._close_finger(tgt_block)
@@ -1327,7 +1341,7 @@ class Primitive(object):
             path["close_finger"] = res[2]
         print("[DEBUG] try to change to target pose")
         t1 = time.time()
-        res = self._change_pose(tgt_block, tgt_pos, tgt_orn, abstract_grasp=True)
+        res = self._change_pose(tgt_block, tgt_pos, tgt_orn, tgt_obj_offset, abstract_grasp=True)
         change_pose_time = time.time() - t1
         if not res[0]:
             if self.verbose > 0:

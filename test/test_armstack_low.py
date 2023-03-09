@@ -27,7 +27,7 @@ def compute_action(state, next_state):
     orientation = nxt_pos[block_id][3:]
     euler = np.asarray(p.getEulerFromQuaternion(orientation)) / (np.pi / 2)
     action = np.concatenate([[block_id], position, euler])
-    action[3] += 0.05
+    action[3] += 0.001
     print("[DEBUG] pos_err={}".format(pos_err))
     return action
 
@@ -37,8 +37,8 @@ def test_armstack_low(traj_path, length=None, n_object=None):
     _actions_history = traj_data['actions']
     _states_history = traj_data['states']
 
-    _actions_history = _actions_history[:1]
-    _states_history = _states_history[0:2]
+    _actions_history = _actions_history[:3]
+    _states_history = _states_history[0:4]
 
     if n_object is None:
         n_object = len(_states_history[0]['objects']['qpos'])
@@ -49,7 +49,7 @@ def test_armstack_low(traj_path, length=None, n_object=None):
     for i, s in enumerate(_states_history):
         _states_history[i]['objects']['qpos'] = np.array(_states_history[i]['objects']['qpos'][:n_object])
         _states_history[i]['objects']['qvel'] = np.zeros_like(_states_history[i]['objects']['qvel'][:n_object])
-        _states_history[i]['objects']['qpos'][:, 2] += 0.005
+        _states_history[i]['objects']['qpos'][:, 2] += 0.001
         '''for qpos in _states_history[i]['objects']['qpos']:
             theta = np.pi / 4 * 3
             qpos[3:7][3] = np.cos(theta)
@@ -66,9 +66,10 @@ def test_armstack_low(traj_path, length=None, n_object=None):
     _states_history[1]['objects']['qpos'][1][1] += 0.3'''
     _states_history[0]['objects']['qpos'][1][1] -= 0.1
     _states_history[1]['objects']['qpos'][1][1] -= 0.1
-    #_states_history[2]['objects']['qpos'][1][1] -= 0.1
+    _states_history[2]['objects']['qpos'][1][1] -= 0.1
     # _states_history[1]['objects']['qpos'][:, 2] += 0.05
 
+    _states_history = list(reversed(_states_history))
 
     fig, ax = plt.subplots(1, 1)
     os.makedirs("debug_tmp", exist_ok=True)
@@ -77,7 +78,7 @@ def test_armstack_low(traj_path, length=None, n_object=None):
     env = ArmStackwLowPlanner(
         n_object=n_object, reward_type="sparse", action_dim=7, generate_data=True, primitive=True,
         n_to_stack=np.array([[1, 2, 3]]), name="allow_rotation", 
-        robot="xarm", invisible_robot=False, compute_path=False,
+        robot="xarm", invisible_robot=False, compute_path=True,
     )
     env.reset()
     if length is None:
