@@ -2183,14 +2183,14 @@ class ArmStackwLowPlanner(ArmStack):
         from bullet_envs.env.primitive_stacking_planner import Planner, Executor, Primitive
         planner = Planner(self.plan_low.robot, self.plan_low.p, self.p, smooth_path=self.compute_path)
         executor = Executor(self.robot, self.p, ctrl_mode="teleport", record=True)
-        self.__planner = Primitive(planner, executor, self.blocks_id, None, None,
+        self._planner = Primitive(planner, executor, self.blocks_id, None, None,
                                    self.plan_low.blocks_id, [self.plan_low.table_id],
                                    teleport_arm=not self.compute_path, force_scale=force_scale)
     
     def reset(self):
         obs = super().reset()
         if self.use_low_level_planner:
-            self.__planner.align_at_reset()
+            self._planner.align_at_reset()
         return obs
     
     def step(self, action):
@@ -2212,18 +2212,16 @@ class ArmStackwLowPlanner(ArmStack):
             # get target position & orientation
             # todo: let generate action & not generate action be the same
             obj_id = int(action[0])
-            tgt_pos = torch.zeros(3)
+            tgt_pos = np.zeros(3)
             tgt_orn = action[4:]
-            tgt_pos[0] = action[1]
-                        # (action[1] + 1) * (self.robot.x_workspace[1] - self.robot.x_workspace[0]) / 2 \
-                        #     + self.robot.x_workspace[0]
-            tgt_pos[1] = action[2]
-                        # (action[2] + 1) * (self.robot.y_workspace[1] - self.robot.y_workspace[0]) / 2 \
-                        #     + self.robot.y_workspace[0]
+            tgt_pos[0] = (action[1] + 1) * (self.robot.x_workspace[1] - self.robot.x_workspace[0]) / 2 \
+                            + self.robot.x_workspace[0]
+            tgt_pos[1] = (action[2] + 1) * (self.robot.y_workspace[1] - self.robot.y_workspace[0]) / 2 \
+                            + self.robot.y_workspace[0]
             if self.name == "allow_rotation":
-                tgt_pos[2] = action[3] # (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
+                tgt_pos[2] = (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
             elif self.name == "default":
-                tgt_pos[2] = action[3] # (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
+                tgt_pos[2] = (action[3] + 1) * 0.4 / 2 + self.robot.base_pos[2] + 0.025
             else:
                 raise NotImplementedError
             tgt_orn = tgt_orn * np.pi / 2.
@@ -2275,7 +2273,7 @@ class ArmStackwLowPlanner(ArmStack):
                 else:
                     print("[DEBUG] low level moving")
                     _state = self.p.saveState()
-                    res, path = self.__planner.move_one_object(obj_id, tgt_pos, tgt_orn)
+                    res, path = self._planner.move_one_object(obj_id, tgt_pos, tgt_orn)
                     if res == 0:
                         start_pos_and_rot = [self.p.getBasePositionAndOrientation(self.blocks_id[i]) for i in range(self.n_object)]
                         start_pos, start_rot = zip(*start_pos_and_rot)

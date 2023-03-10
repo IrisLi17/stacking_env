@@ -120,8 +120,8 @@ def get_refine_fn(wrapped_p, body, joints, num_steps):
 def get_image(wrapped_p: PhysClientWrapper, width, height):
     view_matrix = wrapped_p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=[0.5, 0., 0.1],
                                                               distance=1.5,
-                                                              yaw=-60,
-                                                              pitch=-20,
+                                                              yaw=90,
+                                                              pitch=-40,
                                                               roll=0,
                                                               upAxisIndex=2)
     proj_matrix = wrapped_p.computeProjectionMatrixFOV(fov=60,
@@ -539,11 +539,12 @@ class Executor(object):
     def visualize(self, q, label):
         pose = ArmPose(self.robot_id, conf=list(q), wrapped_p=self.p, joints=self.movable_joints)
         pose.assign(self.p)
-        img = get_image(self.p, 500, 500)
+        img = get_image(self.p, 128, 128)
         plt.imsave(f"video_tmp/debugimg_{label}.png", img)
 
 
     def run(self, arm_path: ArmPath, attachments=[], atol=1e-3, early_stop=False, current_state=""):
+        self.robot.change_visual(visible=True)
         if self.verbose > 1:
             print("[Executor] Arm path length", len(arm_path.path))
         set_position_time = 0
@@ -564,7 +565,7 @@ class Executor(object):
                 step_simulation_time += time.time() - t1
                 # time.sleep(0.01)
                 if self.record:
-                    img = get_image(self.p, 500, 500)
+                    img = get_image(self.p, 128, 128)
                     plt.imsave(f"video_tmp/tmpimg_{self.img_idx}{current_state}.png", img)
                     self.img_idx += 1
                 if early_stop and (self.robot.get_end_effector_pos()[2] > 0.25 or quat_rot_vec(self.robot.get_end_effector_orn(as_type="quat"), np.array([0., 0., 1.]))[2] < -0.9):

@@ -55,6 +55,9 @@ class ArmRobot(object):
         self.init_gripper_axis = init_gripper_axis
         self.init_gripper_quat = init_gripper_quat
         self.collision_pairs = set()
+        self.original_rgbs = []
+        for shape in self.p.getVisualShapeData(self._robot):
+            self.original_rgbs.append((shape[1], shape[7]))
 
         self.compute_ik_information()
         self.reset()
@@ -227,6 +230,14 @@ class ArmRobot(object):
         self.p.setJointMotorControlArray(self._robot, self.motorIndices, self.p.POSITION_CONTROL, tgt_joint_pos,
                                          tgt_velocities, [self.maxForce[j] for j in self.motorIndices],
                                          **kwargs)
+
+    def change_visual(self, visible=True):
+        if visible:
+            for link_id, rgba in self.original_rgbs:
+                self.p.changeVisualShape(self._robot, link_id, rgbaColor=rgba)
+        else:
+            for (link_id, _) in self.original_rgbs:
+                self.p.changeVisualShape(self._robot, link_id, rgbaColor=(0., 0., 0., 0.))
 
 
 class KinovaRobot(ArmRobot):
@@ -613,7 +624,7 @@ class XArm7Robot(ArmRobot):
         topdown_quat = quat_mul(np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]), topdown_quat)
         topdown = quat2euler(topdown_quat) # [pi, 0., pi/2]
         super(XArm7Robot, self).__init__(physics_client, "xarm7_with_gripper.urdf", urdfrootpath, init_qpos,
-                                         [0., 0.2, 0.005], [0., 0., 0., 1.], init_end_effector_pos,
+                                         [0., 0.0, 0.0], [0., 0., 0., 1.], init_end_effector_pos,
                                          topdown, end_effector_index, reset_finger_joints,
                                          useOrientation, useNullSpace, topdown,
                                          np.array([0., 0., -1.]), init_gripper_quat)
@@ -686,6 +697,9 @@ class XArm7Robot(ArmRobot):
         gripper_vel *=  1. / 240 * self.num_substeps
         return np.concatenate([eef_pos, eef_euler, eef_vl, gripper_pos, gripper_vel])
 
+    def get_obs(self):
+        return np.zeros((7,), dtype=np.float32)
+    
     def set_state(self, state_dict):
         print("[DEBUG]", self.p.getNumJoints(self.id))
         for j in range(self.p.getNumJoints(self.id)):

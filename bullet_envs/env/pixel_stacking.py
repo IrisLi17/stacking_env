@@ -7,7 +7,7 @@
 # then reward would be difficult to obtain, everything else seem fine
 
 
-from bullet_envs.env.primitive_stacking import ArmStack
+from bullet_envs.env.primitive_stacking import ArmStack, ArmStackwLowPlanner
 from bullet_envs.env.primitive_env import render
 import os
 import numpy as np
@@ -15,13 +15,15 @@ from functools import partial
 from collections import deque
 import pybullet as p
 from pybullet_utils import bullet_client as bc
+import copy
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
 
 
-class PixelStack(ArmStack):
-    def __init__(self, view_mode="third", feature_dim=768, 
-                 shift_params=(0, 0), *args, **kwargs):
+class PixelStack(ArmStackwLowPlanner):
+    def __init__(self, *args, view_mode="third", feature_dim=768, 
+                 shift_params=(0, 0),
+                 **kwargs):
         self.view_mode = view_mode
         self.privilege_dim = None
         self.feature_dim = feature_dim
@@ -42,11 +44,6 @@ class PixelStack(ArmStack):
     #         self.p.configureDebugVisualizer(self.p.COV_ENABLE_RENDERING, 0)
     #         self.p.configureDebugVisualizer(self.p.COV_ENABLE_GUI, 0)
     
-    def _setup_callback(self):
-        super()._setup_callback()
-        for shape in self.p.getVisualShapeData(self.robot.id):
-            self.p.changeVisualShape(self.robot.id, shape[1], rgbaColor=(0, 0, 0, 0))
-
     def reset(self):
         if len(self.task_queue) == 0:
             self._reset_sim()
@@ -64,10 +61,13 @@ class PixelStack(ArmStack):
         obs = self._get_obs()
         if len(self.task_queue) > 0:
             assert np.linalg.norm(obs["privilege_info"] - task_array[7: -self.feature_dim]) < 1e-3, (obs["privilege_info"], task_array[7: -self.feature_dim])
+        if self.use_low_level_planner:
+            self._planner.align_at_reset()
         return obs
     
     def _get_obs(self):
         # TODO: tweak view angle, or simply make the robot invisible
+        self.robot.change_visual(visible=False)
         scene = render(self.p, width=128, height=128, robot=self.robot, view_mode=self.view_mode,
                        shift_params=self.shift_params, pitch=-45, distance=0.6,
                        camera_target_position=(0.5, 0.0, 0.1)).transpose((2, 0, 1))[:3]
@@ -211,7 +211,7 @@ class PixelStack(ArmStack):
     
     def set_dist_threshold(self, dist_threshold):
         self.dist_threshold = dist_threshold
-    
+
 def quat_apply(a, b):
     shape = b.shape
     a = a.reshape((4,))
