@@ -16,6 +16,9 @@ import copy
 from collections import OrderedDict
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
+from itertools import combinations
+from functools import partial
+from bullet_envs.env.primitive_env import render
 
 DATAROOT = pybullet_data.getDataPath()
 # raw image training
@@ -606,9 +609,9 @@ class ArmGoalEnv(gym.Env):
             )'''
             
             view_matrix = self.p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=[0.5, 0.0, 0.1],
-                                                                   distance=1.1,
-                                                                   yaw=-60,
-                                                                   pitch=-20,
+                                                                   distance=0.6,
+                                                                   yaw=90,
+                                                                   pitch=-45,
                                                                    roll=0,
                                                                    upAxisIndex=2)
             proj_matrix = self.p.computeProjectionMatrixFOV(
@@ -1346,7 +1349,7 @@ class ArmStack(ArmPickAndPlace):
         self.multi_step_goal = False
 
         self.expand_traj = None  # if use saved expand traj, the current goal and simulated objects
-        if self.use_expand_goal_prob > 0:
+        if self.use_expand_goal_prob > 0 and expand_task_path is not None:
             with open(expand_task_path, "rb") as f:  # collect_data_last_step
                 data = pickle.load(f)
                 self.offline_datasets = data["expansion"]  # 4300 data in form of obs, actions, rewards
@@ -2026,17 +2029,43 @@ class ArmStack(ArmPickAndPlace):
         self.presampled_obs = traj_obs
     
     def create_generalize_task(self, shape="3T"):
+        def objects_in_collision():
+            self.p.performCollisionDetection()
+            all_contact_points = self.p.getContactPoints()
+            if len(all_contact_points):
+                _, bodyA, bodyB, linkA, linkB, *_ = zip(*all_contact_points)
+                set1 = set(zip(zip(bodyA, linkA), zip(bodyB, linkB)))
+                set2 = set(zip(zip(bodyB, linkB), zip(bodyA, linkA)))
+                all_contact_set = set.union(set1, set2)
+                moving_body_and_links = [(body, -1) for body in self.blocks_id]
+                check_link_pairs = set(combinations(moving_body_and_links, 2))
+                is_collision = not all_contact_set.isdisjoint(check_link_pairs)
+            else:
+                is_collision = False
+            return is_collision
+
         assert shape in ["3T", "I", "Y", "Y_v2", "2I"]
         robot_obs = self.robot.get_obs()
         all_position = np.array([
             [self.np_random.uniform(*self.robot.x_workspace),
             self.np_random.uniform(*self.robot.y_workspace),
-            self.robot.base_pos[2] + self.np_random.uniform(0.025, 0.075)]
+            self.robot.base_pos[2] + self.np_random.uniform(0.025, 0.025)]
             for _ in range(self.n_object)])
         for i in range(self.n_object):
             self.p.resetBasePositionAndOrientation(
                 self.blocks_id[i], all_position[i], self.gen_obj_quat()
             )
+        while objects_in_collision():
+            all_position = np.array([
+                [self.np_random.uniform(*self.robot.x_workspace),
+                self.np_random.uniform(*self.robot.y_workspace),
+                self.robot.base_pos[2] + 0.025]
+                for _ in range(self.n_object)
+            ])
+            for i in range(self.n_object):
+                self.p.resetBasePositionAndOrientation(
+                    self.blocks_id[i], all_position[i], self.gen_obj_quat()
+                )
         for _ in range(50):
             self.p.stepSimulation()
         init_state = []
@@ -2174,7 +2203,8 @@ class ArmStackwLowPlanner(ArmStack):
         super().__init__(*args, **kwargs)
 
         if self.use_low_level_planner:
-            self._create_low_level_planner(force_scale, kwargs.get('robot'))
+            pass
+            # self._create_low_level_planner(force_scale, kwargs.get('robot'))
     
     def _create_low_level_planner(self, force_scale, robot):
         from bullet_envs.env.primitive_stacking_lowlevel import LowLevelEnv
@@ -2189,8 +2219,8 @@ class ArmStackwLowPlanner(ArmStack):
     
     def reset(self):
         obs = super().reset()
-        if self.use_low_level_planner:
-            self._planner.align_at_reset()
+        # if self.use_low_level_planner:
+        #     self._planner.align_at_reset()
         return obs
     
     def step(self, action):
@@ -2271,9 +2301,107 @@ class ArmStackwLowPlanner(ArmStack):
                     future_pos = self._get_achieved_goal()[0]
                     stable = not any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3)
                 else:
-                    print("[DEBUG] low level moving")
+                    # print("[DEBUG] low level moving")
+                    # _state = self.p.saveState()
+                    # res, path = self._planner.move_one_object(obj_id, tgt_pos, tgt_orn)
+                    print("[DEBUG] primitive moving")
                     _state = self.p.saveState()
-                    res, path = self._planner.move_one_object(obj_id, tgt_pos, tgt_orn)
+                    if not hasattr(self.robot, "video_writer"):
+                        import imageio
+                        self.robot.video_writer = imageio.get_writer("robot_demo.mp4",
+                                                fps=20,
+                                                format='FFMPEG',
+                                                codec='h264',)
+                        self.robot.save_video = True
+                    obj_init_pos, obj_init_quat = self.p.getBasePositionAndOrientation(self.blocks_id[obj_id])
+                    # print("obj init quat", obj_init_quat)
+                    obj_T_grasp = []
+                    for x_offset in [0.]:
+                        for x_rot in [0., np.pi / 2, np.pi, -np.pi / 2]:
+                            for z_rot in [0., np.pi]:
+                                local_grasp = np.eye(4)
+                                local_grasp[:3, :3] = (np.array(self.p.getMatrixFromQuaternion([np.sin(x_rot / 2), 0., 0., np.cos(x_rot / 2)])).reshape(3, 3)) \
+                                    @ (np.array(self.p.getMatrixFromQuaternion([0., 0., np.sin(z_rot / 2), np.cos(z_rot / 2)])).reshape(3, 3)) \
+                                    @ (np.array(self.p.getMatrixFromQuaternion([1., 0., 0., 0.])).reshape(3, 3))
+                                local_grasp[:3, 3] = np.array([x_offset, 0., 0.])
+                                obj_T_grasp.append(local_grasp)
+                    O_T_obj_init = np.eye(4)
+                    O_T_obj_init[:3, :3] = np.array(self.p.getMatrixFromQuaternion(obj_init_quat)).reshape(3, 3)
+                    O_T_obj_init[:3, 3] = np.array(obj_init_pos)
+                    O_T_grasp_pick = [O_T_obj_init @ local_grasp for local_grasp in obj_T_grasp]
+                    O_T_grasp_place = []
+                    for x_rot in [0., np.pi / 2, np.pi, -np.pi / 2]:
+                        O_T_obj_end = np.eye(4)
+                        O_T_obj_end[:3, :3] = np.array(self.p.getMatrixFromQuaternion(tgt_orn)).reshape(3, 3) @ np.array(self.p.getMatrixFromQuaternion([np.sin(x_rot / 2), 0., 0., np.cos(x_rot / 2)])).reshape(3, 3)
+                        O_T_obj_end[:3, 3] = np.array(tgt_pos)
+                        O_T_grasp_place.append([O_T_obj_end @ local_grasp for local_grasp in obj_T_grasp])
+                    q0 = np.array([0.0006290743156705777, -0.6363918264046711, -0.00048377514187155377, -2.498912361135347, -0.000301933506133224, 1.8636677063581644, 0.7857285239452109])
+                    valid_grasp_idx = None
+                    for i in range(len(O_T_grasp_pick)):
+                        print(O_T_grasp_pick[i])
+                        quat_pick = mat2quat(O_T_grasp_pick[i][:3, :3])
+                        pick_prob_vec, _ = self.p.multiplyTransforms([0., 0., 0.], quat_pick, [0., 0., 1.0], [0., 0., 0., 1.0])
+                        pick_prob_vec = np.array(pick_prob_vec)
+                        print("pick prob", pick_prob_vec)
+                        if not np.dot(pick_prob_vec, np.array([0., 0., -1.0])) > 0.7:
+                            continue
+                        for sym_idx in range(len(O_T_grasp_place)):
+                            place_success = False
+                            quat_place = mat2quat(O_T_grasp_place[sym_idx][i][:3, :3])
+                            place_prob_vec, _ = self.p.multiplyTransforms([0., 0., 0.], quat_place, [0., 0., 1.0], [0., 0., 0., 1.0])
+                            place_prob_vec = np.array(place_prob_vec)
+                            print("place prob", place_prob_vec)
+                            if np.dot(place_prob_vec, np.array([0., 0., 1.0])) > 0.6 or np.dot(place_prob_vec, np.array([-1.0, 0., 0.])) > 0.6:
+                                pass
+                            else:
+                                place_success = True
+                                break
+                        if not place_success:
+                            continue
+                        _, ik_pick_success = self.robot.solve_inverse_kinematics(O_T_grasp_pick[i][:3, 3], quat_pick, q0)
+                        _, ik_place_success = self.robot.solve_inverse_kinematics(O_T_grasp_place[sym_idx][i][:3, 3], quat_place, q0)
+                        if ik_pick_success and ik_place_success:
+                            valid_grasp_idx = i
+                            break
+                    if valid_grasp_idx is None:
+                        print("[ERROR] fail to find grasp")
+                        res = -1
+                        exit()
+                    else:
+                        self.robot.reset_primitive(
+                            'open', (self.blocks_id[obj_id], -1), 
+                            partial(render, robot=self.robot, view_mode="third", width=500, height=500, 
+                                    shift_params=(0, 0))
+                            )
+                        init_eef_pos = self.robot.get_eef_position()
+                        init_eef_quat = self.robot.get_eef_orn()
+                        attachment = dict(obj_id=self.blocks_id[obj_id], obj_T_grasp=obj_T_grasp[valid_grasp_idx])
+                        ee_trajectory = [
+                            (O_T_grasp_pick[valid_grasp_idx][:3, 3] - pick_prob_vec * 0.05, quat_pick, None, None),
+                            (O_T_grasp_pick[valid_grasp_idx][:3, 3], quat_pick, "close", None),
+                            (O_T_grasp_pick[valid_grasp_idx][:3, 3] - pick_prob_vec * 0.1, quat_pick, None, attachment),
+                            (np.concatenate([(O_T_grasp_pick[valid_grasp_idx][:3, 3] - pick_prob_vec * 0.1)[:2], [0.3]]), quat_place, None, attachment),
+                            (O_T_grasp_place[sym_idx][valid_grasp_idx][:3, 3] - place_prob_vec * 0.05, quat_place, None, attachment),
+                            (O_T_grasp_place[sym_idx][valid_grasp_idx][:3, 3], quat_place, "open", attachment),
+                            (O_T_grasp_place[sym_idx][valid_grasp_idx][:3, 3] - place_prob_vec * 0.05 + np.array([0., 0., 0.15]), quat_place, None, None),
+                            (init_eef_pos, init_eef_quat, None, None)
+                        ]
+                        for i in range(len(ee_trajectory)):
+                            self.robot.change_visual(True)
+                            res = self.robot.move_to_ee_pose(ee_trajectory[i][0], ee_trajectory[i][1], ee_trajectory[i][3])
+                            if res < 0:
+                                print(f"[ERROR] fail in {i}")
+                                break
+                            if ee_trajectory[i][2] == "close":
+                                self.robot.gripper_grasp()
+                            elif ee_trajectory[i][2] == "open":
+                                self.robot.gripper_move("open", teleport=False)
+                        if res < 0:
+                            print("[ERROR] move failed")
+                            exit()
+                        else:
+                            print("[SUCCESS]")
+
                     if res == 0:
                         start_pos_and_rot = [self.p.getBasePositionAndOrientation(self.blocks_id[i]) for i in range(self.n_object)]
                         start_pos, start_rot = zip(*start_pos_and_rot)
@@ -2287,7 +2415,6 @@ class ArmStackwLowPlanner(ArmStack):
                         self.p.setJointMotorControlArray(self.robot._robot, self.robot.motorIndices, self.p.POSITION_CONTROL, servo_angles)
                         self.p.stepSimulation()
                     self.p.removeState(_state)
-
             obs = self._get_obs()
             reward, info = self.compute_reward_and_info()
             done = False
@@ -2305,6 +2432,11 @@ class ArmStackwLowPlanner(ArmStack):
                 self.p.stepSimulation()
             count += 1
         print(f"Sim until stable: {count} rounds")
+    
+    def close(self) -> None:
+        if hasattr(self.robot, "video_writer"):
+            self.robot.video_writer.close()
+        return super().close()
 
 
 def _create_block(physics_client, halfExtents, pos, orn, mass=0.2, rgba=None, vel=None, vela=None):

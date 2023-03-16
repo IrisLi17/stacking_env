@@ -1,6 +1,6 @@
 import pybullet as p 
 import pybullet_utils.bullet_client as bc
-from bullet_envs.env.bullet_rotations import quat_diff, quat_mul
+from bullet_envs.env.bullet_rotations import quat_diff, quat_mul, mat2quat
 import numpy as np
 import os
 
@@ -194,12 +194,13 @@ class PandaRobot(object):
         self.id = self.p.loadURDF(self.urdf_path, base_pos, base_orn, useFixedBase=True)
         if init_qpos is None:
             # init_qpos = [0.98, 0.458, 0.31, -2.24, -0.30, 2.66, 2.32, 0, 0, 0.02, 0.02, 0]
-            init_qpos = [0.0, 0.0, 0.0, -2.0, 0., 2.0, 1.0, 0, 0, 0.0, 0.0, 0]
+            init_qpos = [0.0, 0.0, 0.0, -2.0, 0., 2.0, 1.0, 0, 0, 0.04, 0.04, 0]
 
         self.motor_indices = []
         self.joint_ll = []
         self.joint_ul = []
         self.joint_damping = []
+        self.joint_vel_limit = []
         for j in range(self.p.getNumJoints(self.id)):
             self.p.changeDynamics(self.id, j, linearDamping=0, angularDamping=0)
             joint_info = self.p.getJointInfo(self.id, j)
@@ -209,7 +210,9 @@ class PandaRobot(object):
                 self.joint_damping.append(joint_info[6])
                 self.joint_ll.append(joint_info[8])
                 self.joint_ul.append(joint_info[9])
+                self.joint_vel_limit.append(joint_info[11])
 
+        self.joint_vel_limit = np.array(self.joint_vel_limit)
         self.joint_ranges = [5] * len(self.joint_ll)
         self.rest_poses = np.array(init_qpos)[self.motor_indices]
         self.eef_index = 11
@@ -235,6 +238,14 @@ class PandaRobot(object):
                                     childFramePosition=[0, 0, 0])
         self.p.changeConstraint(c, gearRatio=-1, erp=0.1, maxForce=50)
 
+        self.forward_kin_p = bc.BulletClient(connection_mode=p.DIRECT)
+        self.forward_kin_robot = self.forward_kin_p.loadURDF(self.urdf_path, base_pos, base_orn, useFixedBase=True)
+        self.default_Kq = np.array([20, 30, 25, 25, 15, 10, 10])
+        self.default_Kqd = np.array([1.0, 1.5, 1.0, 1.0, 0.5, 0.5, 0.5])
+        self.original_rgbs = []
+        for shape in self.p.getVisualShapeData(self._robot):
+            self.original_rgbs.append((shape[1], shape[7]))
+
     @property
     def _robot(self):
         return self.id
@@ -243,6 +254,14 @@ class PandaRobot(object):
     def motorIndices(self):
         return self.motor_indices
 
+    def change_visual(self, visible=True):
+        if visible:
+            for link_id, rgba in self.original_rgbs:
+                self.p.changeVisualShape(self._robot, link_id, rgbaColor=rgba)
+        else:
+            for (link_id, _) in self.original_rgbs:
+                self.p.changeVisualShape(self._robot, link_id, rgbaColor=(0., 0., 0., 0.))
+    
     def get_obs(self):
         # joint_pos = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
         # scaled_joint_pos = 2 * (joint_pos - np.array(self.joint_ll[:7])) / (np.array(self.joint_ul[:7]) - np.array(self.joint_ll[:7])) - 1.0
@@ -367,6 +386,39 @@ class PandaRobot(object):
         for j in self.motor_indices[7:]:
             self.p.resetJointState(self.id, j, finger)
 
+    def trajectory_control(self, waypoints, attachment: dict = None):
+        for i, waypoint in enumerate(waypoints):
+            # self.p.setJointMotorControlArray(
+            #     self.id, self.motor_indices[:7], self.p.POSITION_CONTROL, waypoint["position"], waypoint["velocity"],
+            #     positionGains=self.default_Kq, velocityGains=self.default_Kqd
+            # )
+            # self.p.stepSimulation()
+            for idx, j in enumerate(self.motor_indices[:7]):
+                self.p.resetJointState(self.id, j, waypoint["position"][idx])
+            # finger and attachment
+            if self.gripper_status == "open":
+                for j in self.motor_indices[7:]:
+                    self.p.resetJointState(self.id, j, 0.04)
+            else:
+                for j in self.motor_indices[7:]:
+                    self.p.resetJointState(self.id, j, 0.025)
+            self.p.stepSimulation()
+            if attachment is not None:
+                obj_T_grasp = attachment["obj_T_grasp"]
+                obj_id = attachment["obj_id"]
+                O_T_grasp = np.eye(4)
+                O_T_grasp[:3, :3] = np.array(self.p.getMatrixFromQuaternion(self.get_eef_orn())).reshape(3, 3)
+                O_T_grasp[:3, 3] = self.get_eef_position()
+                O_T_obj = O_T_grasp @ np.linalg.inv(obj_T_grasp)
+                obj_quat = mat2quat(O_T_obj[:3, :3])
+                obj_pos = O_T_obj[:3, 3]
+                self.p.resetBasePositionAndOrientation(obj_id, obj_pos, obj_quat)
+                self.p.resetBaseVelocity(obj_id, [0., 0., 0.], [0., 0., 0.])
+            if i % 12 == 0 and self.save_video:
+                color = self.render_fn(self.p)[..., :3]
+                # color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                self.video_writer.append_data(color)
+    
     def _change_dynamics(self):
         return
         self.p.performCollisionDetection()
@@ -411,6 +463,81 @@ class PandaRobot(object):
         self.render_fn = render_fn
         self.goal_img = goal_img
     
+    def solve_inverse_kinematics(
+        self,
+        position: np.ndarray,
+        orientation: np.ndarray,
+        q0: np.ndarray,
+        tol: float = 1e-3,
+    ):
+        """Compute inverse kinematics given desired EE pose"""
+        q0 = np.copy(q0)
+        # Call IK
+        for idx, j in enumerate(self.motor_indices[:7]):
+            self.forward_kin_p.resetJointState(self.forward_kin_robot, j, q0[idx])
+        temp_q = q0
+        ik_sol_found = False
+        count = 0
+        while (not ik_sol_found) and count < 20:
+            joint_pos_output = self.forward_kin_p.calculateInverseKinematics(
+                self.forward_kin_robot, self.eef_index, position, orientation,
+                self.joint_ll[:7], self.joint_ul[:7], self.joint_ranges[:7], temp_q,
+                maxNumIterations=20,)
+            temp_q = joint_pos_output
+            # Check result
+            for idx, j in enumerate(self.motor_indices[:7]):
+                self.forward_kin_p.resetJointState(self.forward_kin_robot, j, joint_pos_output[idx])
+            pos_output, quat_output, *_ = self.forward_kin_p.getLinkState(self.forward_kin_robot, self.eef_index)
+            # pose_desired = T.from_rot_xyz(R.from_quat(orientation), position)
+            # pose_output = T.from_rot_xyz(R.from_quat(quat_output), pos_output)
+            # err = torch.linalg.norm((pose_desired * pose_output.inv()).as_twist())
+            # print("[IK debug]", pos_output, position)
+            err = np.linalg.norm(pos_output - position)
+            ik_sol_found = err < tol
+            count += 1
+        return joint_pos_output[:7], ik_sol_found
+    
+    def _adaptive_time_to_go(self, joint_displacement: np.ndarray):
+        """Compute adaptive time_to_go
+        Computes the corresponding time_to_go such that the mean velocity is equal to one-eighth
+        of the joint velocity limit:
+        time_to_go = max_i(joint_displacement[i] / (joint_velocity_limit[i] / 8))
+        (Note 1: The magic number 8 is deemed reasonable from hardware tests on a Franka Emika.)
+        (Note 2: In a min-jerk trajectory, maximum velocity is equal to 1.875 * mean velocity.)
+        The resulting time_to_go is also clipped to a minimum value of the default time_to_go.
+        """
+        joint_pos_diff = np.abs(joint_displacement)
+        time_to_go = np.max(joint_pos_diff / self.joint_vel_limit[:7] * 8.0)
+        return max(time_to_go, 1.0)
+    
+    def move_to_ee_pose(self, eef_pos, eef_orn, attachment=None):
+        joint_pos_current = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
+        joint_pos_desired, success = self.solve_inverse_kinematics(
+            eef_pos, eef_orn, q0 = np.array([0.0006290743156705777, -0.6363918264046711, -0.00048377514187155377, -2.498912361135347, -0.000301933506133224, 1.8636677063581644, 0.7857285239452109])
+        )
+        if not success:
+            print("ik failed in trajplan_move_ee_pose")
+            return -1
+        time_to_go = self._adaptive_time_to_go(
+            joint_pos_desired - joint_pos_current
+        )
+        n_steps = int(time_to_go * 240)
+        print("n steps", n_steps)
+        waypoints = [
+            dict(position=joint_pos_current + (joint_pos_desired - joint_pos_current) / n_steps * (i + 1), velocity=np.zeros(7))
+            for i in range(n_steps)
+        ]
+        # waypoints = toco.planning.generate_cartesian_target_joint_min_jerk(
+        #     joint_pos_start=joint_pos_current,
+        #     ee_pose_goal=ee_pose_desired,
+        #     time_to_go=time_to_go,
+        #     hz=240,
+        #     robot_model=self.robot_model,
+        #     home_pose=self.home_pose,
+        # )
+        self.trajectory_control(waypoints, attachment)
+        return 0
+
     def move_direct_ee_pose(self, eef_pos, eef_orn, pos_threshold=None, rot_threshold=None):
         if pos_threshold is None:
             pos_threshold = self.pos_threshold
@@ -495,8 +622,15 @@ class PandaRobot(object):
         width = 0.08 if target_status == "open" else 0.0
         self.gripper_status = target_status
         if teleport:
-            for j in self.motor_indices[7:]:
-                self.p.resetJointState(self.id, j, width / 2)
+            cur_width = self.get_finger_width()
+            for _ in range(50):
+                for j in self.motor_indices[7:]:
+                    self.p.resetJointState(self.id, j, cur_width / 2 + (width / 2 - cur_width / 2) / 50 * (_ + 1))
+                    self.p.stepSimulation()
+                if _ % 12 == 0:
+                    color = self.render_fn(self.p)[..., :3]
+                    # color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                    self.video_writer.append_data(color)
         else:
             # self.p.setJointMotorControlArray(
             #     self.id, self.motor_indices[7:], self.p.POSITION_CONTROL, [width / 2] * len(self.motor_indices[7:]),
@@ -510,8 +644,8 @@ class PandaRobot(object):
                 self.p.stepSimulation()
                 if self.save_video and step_count % self.num_substeps == 0:
                     color = self.render_fn(self.p)[..., :3]
-                    color_with_goal = np.concatenate([color, self.goal_img], axis=1)
-                    self.video_writer.append_data(color_with_goal)
+                    # color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                    self.video_writer.append_data(color)
                 step_count += 1
                 if self.get_finger_width() - width > -2e-3 or step_count >= self.max_atomic_step:
                     break
@@ -533,8 +667,8 @@ class PandaRobot(object):
             self.p.stepSimulation()
             if self.save_video and atomic_step % self.num_substeps == 0:
                 color = self.render_fn(self.p)[..., :3]
-                color_with_goal = np.concatenate([color, self.goal_img], axis=1)
-                self.video_writer.append_data(color_with_goal)
+                # color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                self.video_writer.append_data(color)
             atomic_step += 1
             contact1 = self.p.getContactPoints(bodyA=self.id, linkIndexA=9)
             contact2 = self.p.getContactPoints(bodyA=self.id, linkIndexA=10)
@@ -551,6 +685,7 @@ class PandaRobot(object):
                             robot_T_world = self.p.invertTransform(robot_pose[0], robot_pose[1])
                             robot_T_obj = self.p.multiplyTransforms(robot_T_world[0], robot_T_world[1], obj_pose[0], obj_pose[1])
                             # (The robot moves weirdly, so I removed this) Add contact constraint
+                            '''
                             self.contact_constraint = self.p.createConstraint(
                                 parentBodyUniqueId=self.id,
                                 parentLinkIndex=self.eef_index,
@@ -562,6 +697,7 @@ class PandaRobot(object):
                                 parentFrameOrientation=robot_T_obj[1],
                                 childFramePosition=(0, 0, 0),
                                 childFrameOrientation=(0, 0, 0))
+                            '''
                         return
             if self.get_finger_width() < 2e-3 or atomic_step >= self.max_atomic_step:
                 # print("grasp step count", atomic_step)

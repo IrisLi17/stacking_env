@@ -52,6 +52,7 @@ class PixelStack(ArmStackwLowPlanner):
             self.goal = self.goal_dict["under_specify_state"]
         else:
             idx = np.random.randint(len(self.task_queue))
+            print("reset idx", idx)
             task_array = self.task_queue[idx]
             self.set_task(task_array)
         self.n_step = 0
@@ -61,8 +62,8 @@ class PixelStack(ArmStackwLowPlanner):
         obs = self._get_obs()
         if len(self.task_queue) > 0:
             assert np.linalg.norm(obs["privilege_info"] - task_array[7: -self.feature_dim]) < 1e-3, (obs["privilege_info"], task_array[7: -self.feature_dim])
-        if self.use_low_level_planner:
-            self._planner.align_at_reset()
+        # if self.use_low_level_planner:
+        #     self._planner.align_at_reset()
         return obs
     
     def _get_obs(self):

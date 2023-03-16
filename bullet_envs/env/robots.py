@@ -46,6 +46,7 @@ class ArmRobot(object):
             self.maxVelocity.append(joint_info[11])
             self.maxForce.append(joint_info[10])
             self.jointDamping.append(joint_info[6])
+        self.joint_vel_limit = np.array(self.maxVelocity)
         self.ndof = len(self.joint_ll)
         self._post_gripper()
         self.IKInfo = None
@@ -58,6 +59,9 @@ class ArmRobot(object):
         self.original_rgbs = []
         for shape in self.p.getVisualShapeData(self._robot):
             self.original_rgbs.append((shape[1], shape[7]))
+        
+        self.forward_kin_p = bc.BulletClient(connection_mode=p.DIRECT)
+        self.forward_kin_robot = self.forward_kin_p.loadURDF(self.urdf_path, base_pos, base_orn, useFixedBase=True)
 
         self.compute_ik_information()
         self.reset()
@@ -239,7 +243,85 @@ class ArmRobot(object):
             for (link_id, _) in self.original_rgbs:
                 self.p.changeVisualShape(self._robot, link_id, rgbaColor=(0., 0., 0., 0.))
 
+    def solve_inverse_kinematics(
+        self,
+        position: np.ndarray,
+        orientation: np.ndarray,
+        q0: np.ndarray,
+        tol: float = 1e-3,
+    ):
+        """Compute inverse kinematics given desired EE pose"""
+        # Call IK
+        joint_pos_output = self.p.calculateInverseKinematics(
+            self.id, self.eef_index, position, orientation,
+            self.joint_ll[:7], self.joint_ul[:7], self.joint_ranges[:7], q0,
+            maxNumIterations=20,)
 
+        # Check result
+        for idx, j in enumerate(self.motor_indices[:7]):
+            self.forward_kin_p.resetJointState(self.forward_kin_robot, j, joint_pos_output[idx])
+        pos_output, quat_output, *_ = self.forward_kin_p.getLinkState(self.forward_kin_robot, self.eef_index)
+        # pose_desired = T.from_rot_xyz(R.from_quat(orientation), position)
+        # pose_output = T.from_rot_xyz(R.from_quat(quat_output), pos_output)
+        # err = torch.linalg.norm((pose_desired * pose_output.inv()).as_twist())
+        print("[IK debug]", pos_output, position)
+        err = np.linalg.norm(pos_output - position)
+        ik_sol_found = err < tol
+
+        return joint_pos_output, ik_sol_found
+    
+    def _adaptive_time_to_go(self, joint_displacement: np.ndarray):
+        """Compute adaptive time_to_go
+        Computes the corresponding time_to_go such that the mean velocity is equal to one-eighth
+        of the joint velocity limit:
+        time_to_go = max_i(joint_displacement[i] / (joint_velocity_limit[i] / 8))
+        (Note 1: The magic number 8 is deemed reasonable from hardware tests on a Franka Emika.)
+        (Note 2: In a min-jerk trajectory, maximum velocity is equal to 1.875 * mean velocity.)
+        The resulting time_to_go is also clipped to a minimum value of the default time_to_go.
+        """
+        joint_pos_diff = np.abs(joint_displacement)
+        time_to_go = np.max(joint_pos_diff / self.joint_vel_limit * 8.0)
+        return max(time_to_go, 1.0)
+    
+    def move_to_ee_pose(self, eef_pos, eef_orn):
+        joint_pos_current = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
+        joint_pos_desired, success = self.solve_inverse_kinematics(
+            eef_pos, eef_orn, joint_pos_current
+        )
+        if not success:
+            print("ik failed in trajplan_move_ee_pose")
+            return -1
+        time_to_go = self._adaptive_time_to_go(
+            joint_pos_desired - joint_pos_current
+        )
+        n_steps = int(time_to_go * 240)
+        waypoints = [
+            dict(position=joint_pos_current + (joint_pos_desired - joint_pos_current) / n_steps * (i + 1), velocity=np.zeros(7))
+            for i in range(n_steps)
+        ]
+        # waypoints = toco.planning.generate_cartesian_target_joint_min_jerk(
+        #     joint_pos_start=joint_pos_current,
+        #     ee_pose_goal=ee_pose_desired,
+        #     time_to_go=time_to_go,
+        #     hz=240,
+        #     robot_model=self.robot_model,
+        #     home_pose=self.home_pose,
+        # )
+        self.trajectory_control(waypoints)
+        return 0
+
+    def trajectory_control(self, waypoints):
+        for i, waypoint in enumerate(waypoints):
+            self.p.setJointMotorControlArray(
+                self.id, self.motor_indices[:7], self.p.POSITION_CONTROL, waypoint["position"], waypoint["velocity"],
+                forces=[87] * 7, positionGains=self.default_Kq, velocityGains=self.default_Kqd
+            )
+            self.p.stepSimulation()
+            if i % 12 == 0 and self.save_video:
+                color = self.render_fn(self.p)[..., :3]
+                # color_with_goal = np.concatenate([color, self.goal_img], axis=1)
+                self.video_writer.append_data(color)
+    
 class KinovaRobot(ArmRobot):
     def __init__(self, physics_client, urdfrootpath=KINOVA_MODEL_DIR, init_qpos=None,
                  init_end_effector_pos=(0.4, 0., 0.1), init_end_effector_orn=(0, -math.pi, math.pi/2), lock_finger=False,
@@ -624,7 +706,7 @@ class XArm7Robot(ArmRobot):
         topdown_quat = quat_mul(np.array([0., 0., np.sin(np.pi / 4), np.cos(np.pi / 4)]), topdown_quat)
         topdown = quat2euler(topdown_quat) # [pi, 0., pi/2]
         super(XArm7Robot, self).__init__(physics_client, "xarm7_with_gripper.urdf", urdfrootpath, init_qpos,
-                                         [0., 0.0, 0.0], [0., 0., 0., 1.], init_end_effector_pos,
+                                         [0.0, 0.0, 0.0], [0., 0., 0., 1.], init_end_effector_pos,
                                          topdown, end_effector_index, reset_finger_joints,
                                          useOrientation, useNullSpace, topdown,
                                          np.array([0., 0., -1.]), init_gripper_quat)
@@ -632,9 +714,9 @@ class XArm7Robot(ArmRobot):
         self.collision_pairs = set()
 
         # TODO@gjx: change the right configuration for UR robot
-        self.x_workspace = (self.base_pos[0] + 0.25, self.base_pos[0] + 0.6)
-        self.y_workspace = (self.base_pos[1] - 0.25, self.base_pos[1] + 0.25)
-        self.z_workspace = (self.base_pos[2], self.base_pos[2] + 0.4)
+        self.x_workspace = (0.0 + 0.25, 0.0 + 0.6)
+        self.y_workspace = (0.0 - 0.25, 0.0 + 0.25)
+        self.z_workspace = (0.0, 0.0 + 0.4)
         self.eef_index = 8 # 11
         # self.finger_drive_index = 9
         self.num_substeps = 20

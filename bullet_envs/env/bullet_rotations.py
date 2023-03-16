@@ -23,8 +23,8 @@ def mat2quat(mat):
     if not isinstance(mat, np.ndarray):
         mat = np.array(mat)
     assert mat.shape == (3, 3)
-    assert 1 + mat[0, 0] + mat[1, 1] + mat[2, 2] >= 0, mat
-    qr = 0.5 * np.sqrt(1 + mat[0, 0] + mat[1, 1] + mat[2, 2])
+    assert 1 + mat[0, 0] + mat[1, 1] + mat[2, 2] >= -1e-6, mat
+    qr = 0.5 * np.sqrt(max(1 + mat[0, 0] + mat[1, 1] + mat[2, 2], 0.0))
     if qr > 1e-6:
         qi = (mat[2, 1] - mat[1, 2]) / (4 * qr)
         qj = (mat[0, 2] - mat[2, 0]) / (4 * qr)
