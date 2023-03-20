@@ -3,6 +3,88 @@ import pybullet_utils.bullet_client as bc
 from bullet_envs.env.bullet_rotations import quat_diff, quat_mul, mat2quat
 import numpy as np
 import os
+import pinocchio
+from bullet_envs.env.traj_planning import generate_cartesian_target_joint_min_jerk
+
+
+class RobotModelPinocchio(object):
+    def __init__(self, urdf_filename, ee_link_name) -> None:
+        self.model = pinocchio.buildModelFromUrdf(urdf_filename)
+        self.data = self.model.createData()
+        self.ee_link_name = ee_link_name
+        self.ee_link_idx = self.get_link_idx_from_name(ee_link_name)
+        self.q = pinocchio.neutral(self.model)
+
+    def get_link_idx_from_name(self, link_name: str) -> int:
+        link_idx = self.model.getBodyId(link_name)
+        if link_idx == self.model.nframes:
+            raise RuntimeError
+        return link_idx
+
+    def _get_link_idx_or_use_ee(self, link_name: str = ""):
+        if not link_name:
+            link_idx = self.ee_link_idx
+            assert link_idx
+        else:
+            link_idx = self.get_link_idx_from_name(link_name)
+        return link_idx
+    
+    def get_joint_angle_limits(self) -> np.ndarray:
+        joint_ll = np.array(self.model.lowerPositionLimit)[:7]
+        joint_ul = np.array(self.model.upperPositionLimit)[:7]
+        return np.stack([joint_ll, joint_ul], axis=0)
+
+    def get_joint_velocity_limits(self) -> np.ndarray:
+       return np.array(self.model.velocityLimit)[:7]
+
+    def forward_kinematics(self, joint_positions: np.ndarray, link_name: str = ""):
+        link_idx = self._get_link_idx_or_use_ee(link_name)
+        self.q[:joint_positions.shape[0]] = joint_positions
+        pinocchio.forwardKinematics(self.model, self.data, self.q)
+        pinocchio.updateFramePlacement(self.model, self.data, link_idx)
+        pos_data = self.data.oMf[link_idx].translation
+        quat_data = mat2quat(self.data.oMf[link_idx].rotation)
+        return pos_data, quat_data
+    
+    def compute_jacobian(self, joint_positions: np.ndarray, link_name: str = "") -> np.ndarray:
+        link_idx = self._get_link_idx_or_use_ee(link_name)
+        self.q[:joint_positions.shape[0]] = joint_positions
+        J = np.array(
+            pinocchio.computeFrameJacobian(
+                self.model, self.data, self.q, link_idx, 
+                pinocchio.pinocchio_pywrap.LOCAL_WORLD_ALIGNED
+            )
+        )[:, :joint_positions.shape[0]]
+        return J
+    
+    def inverse_dynamics(self, joint_positions: np.ndarray, joint_velocities: np.ndarray, joint_accelerations: np.ndarray):
+        return np.array(pinocchio.rnea(self.model, self.data, joint_positions, joint_velocities, joint_accelerations))
+
+    def inverse_kinematics(self, link_pos: np.ndarray, link_quat: np.ndarray, link_name: str = "", 
+                           rest_pose: np.ndarray = None, eps: float = 1e-4, max_iters: int = 1000,
+                           dt: float = 0.1, damping: float = 1e-6) -> np.ndarray:        
+        link_idx = self._get_link_idx_or_use_ee(link_name)
+        link_orient = np.array(p.getMatrixFromQuaternion(link_quat)).reshape((3, 3))
+        desired_ee = pinocchio.SE3(link_orient, link_pos)
+        q = np.array(self.q)
+        q[:rest_pose.shape[0]] = rest_pose
+        for i in range(max_iters):
+            pinocchio.forwardKinematics(self.model, self.data, q)
+            pinocchio.updateFramePlacement(self.model, self.data, link_idx)
+            dMf = desired_ee.actInv(self.data.oMf[link_idx])
+            err = pinocchio.log(dMf).vector
+            if np.linalg.norm(err) < eps:
+                break
+
+            J = np.array(pinocchio.computeFrameJacobian(
+                self.model, self.data, q, link_idx, 
+                pinocchio.LOCAL
+            ))
+            v = -J.T.dot(np.linalg.solve(J.dot(J.T) + damping * np.eye(6), err))
+            q = pinocchio.integrate(self.model, q, v * dt)
+        if np.linalg.norm(err) >= eps:
+            print("Warning: IK does not converge")
+        return np.array(q[:rest_pose.shape[0]])
 
 
 class XArmRobot(object):
@@ -179,11 +261,9 @@ class PandaRobot(object):
     ):
         self.p = physics_client
         self.num_substeps = 20
-        if is_visible:
-            import pybullet_data
-            data_root = pybullet_data.getDataPath()
-        else:
-            data_root = os.path.join(os.path.dirname(__file__), "assets")
+        import pybullet_data
+        data_root = pybullet_data.getDataPath()
+        # data_root = os.path.join(os.path.dirname(__file__), "assets")
         self.urdf_path = os.path.join(data_root, 'franka_panda/panda.urdf')
         self.base_pos = base_pos
         self.base_orn = base_orn
@@ -238,8 +318,9 @@ class PandaRobot(object):
                                     childFramePosition=[0, 0, 0])
         self.p.changeConstraint(c, gearRatio=-1, erp=0.1, maxForce=50)
 
-        self.forward_kin_p = bc.BulletClient(connection_mode=p.DIRECT)
-        self.forward_kin_robot = self.forward_kin_p.loadURDF(self.urdf_path, base_pos, base_orn, useFixedBase=True)
+        self.robot_model = RobotModelPinocchio(self.urdf_path, "panda_grasptarget")
+        self.home_pose = np.array([-0.13935425877571106, -0.020481698215007782, -0.05201413854956627, -2.0691256523132324, 
+                                   0.05058913677930832, 2.0028650760650635, -0.9167874455451965])
         self.default_Kq = np.array([20, 30, 25, 25, 15, 10, 10])
         self.default_Kqd = np.array([1.0, 1.5, 1.0, 1.0, 0.5, 0.5, 0.5])
         self.original_rgbs = []
@@ -473,29 +554,21 @@ class PandaRobot(object):
         """Compute inverse kinematics given desired EE pose"""
         q0 = np.copy(q0)
         # Call IK
-        for idx, j in enumerate(self.motor_indices[:7]):
-            self.forward_kin_p.resetJointState(self.forward_kin_robot, j, q0[idx])
-        temp_q = q0
-        ik_sol_found = False
-        count = 0
-        while (not ik_sol_found) and count < 20:
-            joint_pos_output = self.forward_kin_p.calculateInverseKinematics(
-                self.forward_kin_robot, self.eef_index, position, orientation,
-                self.joint_ll[:7], self.joint_ul[:7], self.joint_ranges[:7], temp_q,
-                maxNumIterations=20,)
-            temp_q = joint_pos_output
-            # Check result
-            for idx, j in enumerate(self.motor_indices[:7]):
-                self.forward_kin_p.resetJointState(self.forward_kin_robot, j, joint_pos_output[idx])
-            pos_output, quat_output, *_ = self.forward_kin_p.getLinkState(self.forward_kin_robot, self.eef_index)
-            # pose_desired = T.from_rot_xyz(R.from_quat(orientation), position)
-            # pose_output = T.from_rot_xyz(R.from_quat(quat_output), pos_output)
-            # err = torch.linalg.norm((pose_desired * pose_output.inv()).as_twist())
-            # print("[IK debug]", pos_output, position)
-            err = np.linalg.norm(pos_output - position)
-            ik_sol_found = err < tol
-            count += 1
-        return joint_pos_output[:7], ik_sol_found
+        joint_pos_output = self.robot_model.inverse_kinematics(
+            position, orientation, rest_pose=q0
+        )
+
+        # Check result
+        pos_output, quat_output = self.robot_model.forward_kinematics(joint_pos_output)
+        pose_desired = pinocchio.SE3(np.array(p.getMatrixFromQuaternion(orientation)).reshape((3, 3)), position)
+        pose_output = pinocchio.SE3(np.array(p.getMatrixFromQuaternion(quat_output)).reshape((3, 3)), pos_output)
+        dMf = pose_desired.actInv(pose_output)
+        err = np.linalg.norm(pinocchio.log(dMf).vector)
+        joint_limits = self.robot_model.get_joint_angle_limits()
+        ik_sol_found = err < tol and np.all(joint_pos_output < joint_limits[1]) and np.all(joint_pos_output > joint_limits[0])
+        if not ik_sol_found:
+            print("ik info", err, joint_pos_output)
+        return joint_pos_output, ik_sol_found
     
     def _adaptive_time_to_go(self, joint_displacement: np.ndarray):
         """Compute adaptive time_to_go
@@ -506,14 +579,15 @@ class PandaRobot(object):
         (Note 2: In a min-jerk trajectory, maximum velocity is equal to 1.875 * mean velocity.)
         The resulting time_to_go is also clipped to a minimum value of the default time_to_go.
         """
+        joint_vel_limits = self.robot_model.get_joint_velocity_limits()
         joint_pos_diff = np.abs(joint_displacement)
-        time_to_go = np.max(joint_pos_diff / self.joint_vel_limit[:7] * 8.0)
+        time_to_go = np.max(joint_pos_diff / joint_vel_limits * 8.0)
         return max(time_to_go, 1.0)
     
     def move_to_ee_pose(self, eef_pos, eef_orn, attachment=None):
         joint_pos_current = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
         joint_pos_desired, success = self.solve_inverse_kinematics(
-            eef_pos, eef_orn, q0 = np.array([0.0006290743156705777, -0.6363918264046711, -0.00048377514187155377, -2.498912361135347, -0.000301933506133224, 1.8636677063581644, 0.7857285239452109])
+            eef_pos, eef_orn, q0 = joint_pos_current
         )
         if not success:
             print("ik failed in trajplan_move_ee_pose")
@@ -523,19 +597,22 @@ class PandaRobot(object):
         )
         n_steps = int(time_to_go * 240)
         print("n steps", n_steps)
-        waypoints = [
-            dict(position=joint_pos_current + (joint_pos_desired - joint_pos_current) / n_steps * (i + 1), velocity=np.zeros(7))
-            for i in range(n_steps)
-        ]
-        # waypoints = toco.planning.generate_cartesian_target_joint_min_jerk(
-        #     joint_pos_start=joint_pos_current,
-        #     ee_pose_goal=ee_pose_desired,
-        #     time_to_go=time_to_go,
-        #     hz=240,
-        #     robot_model=self.robot_model,
-        #     home_pose=self.home_pose,
-        # )
+        # waypoints = [
+        #     dict(position=joint_pos_current + (joint_pos_desired - joint_pos_current) / n_steps * (i + 1), velocity=np.zeros(7))
+        #     for i in range(n_steps)
+        # ]
+        ee_pose_desired = pinocchio.SE3(np.array(p.getMatrixFromQuaternion(eef_orn)).reshape((3, 3)), eef_pos)
+        waypoints = generate_cartesian_target_joint_min_jerk(
+            joint_pos_start=joint_pos_current,
+            ee_pose_goal=ee_pose_desired,
+            time_to_go=time_to_go,
+            hz=240,
+            robot_model=self.robot_model,
+            home_pose=self.home_pose,
+        )
         self.trajectory_control(waypoints, attachment)
+        joint_pos_achieved = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
+        print("move to ee error", joint_pos_achieved - joint_pos_desired)
         return 0
 
     def move_direct_ee_pose(self, eef_pos, eef_orn, pos_threshold=None, rot_threshold=None):
@@ -704,7 +781,19 @@ class PandaRobot(object):
                 return
 
 
+def debug():
+    import pybullet_data
+    data_root = pybullet_data.getDataPath()
+    urdf_filename = os.path.join(data_root, "franka_panda/panda.urdf")
+    pinocchio_model = RobotModelPinocchio(urdf_filename, "panda_hand")
+    q = np.array([0.0006290743156705777, -0.6363918264046711, -0.00048377514187155377, -2.498912361135347, -0.000301933506133224, 1.8636677063581644, 0.7857285239452109, 0.0, 0.0])
+    print(pinocchio_model.forward_kinematics(q))
+    q_1 = pinocchio_model.inverse_kinematics(np.array([0.4, 0.05, 0.3]), np.array([1., 0., 0., 0.]), rest_pose=q)
+    print("ik q", q_1)
+    
 if __name__ == "__main__":
+    debug()
+    exit()
     from pybullet_utils import bullet_client as bc
     client = bc.BulletClient(connection_mode=p.GUI)
     client.resetSimulation()
