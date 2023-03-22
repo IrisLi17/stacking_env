@@ -566,8 +566,8 @@ class PandaRobot(object):
         err = np.linalg.norm(pinocchio.log(dMf).vector)
         joint_limits = self.robot_model.get_joint_angle_limits()
         ik_sol_found = err < tol and np.all(joint_pos_output < joint_limits[1]) and np.all(joint_pos_output > joint_limits[0])
-        if not ik_sol_found:
-            print("ik info", err, joint_pos_output)
+        # if not ik_sol_found:
+        #     print("ik info", err, joint_pos_output)
         return joint_pos_output, ik_sol_found
     
     def _adaptive_time_to_go(self, joint_displacement: np.ndarray):
@@ -611,8 +611,7 @@ class PandaRobot(object):
             home_pose=self.home_pose,
         )
         self.trajectory_control(waypoints, attachment)
-        joint_pos_achieved = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
-        print("move to ee error", joint_pos_achieved - joint_pos_desired)
+        # joint_pos_achieved = np.array([self.p.getJointState(self.id, j)[0] for j in self.motor_indices[:7]])
         return 0
 
     def move_direct_ee_pose(self, eef_pos, eef_orn, pos_threshold=None, rot_threshold=None):

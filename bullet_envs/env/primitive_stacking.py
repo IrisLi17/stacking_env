@@ -16,7 +16,7 @@ import copy
 from collections import OrderedDict
 import pkgutil
 egl = pkgutil.get_loader('eglRenderer')
-from itertools import combinations
+from itertools import combinations, product
 from functools import partial
 from bullet_envs.env.primitive_env import render
 
@@ -734,8 +734,8 @@ class ArmPickAndPlace(ArmGoalEnv):
                         self.p, [0.025, 0.025, 0.025], [10, 0, 1 + 0.5 * i], [0, 0, 0, 1], 0.1, COLOR[i % len(COLOR)]
                     )
                 )
-            for block_id in self.blocks_id:
-                print(f"[DEBUG] block{block_id}:", self.p.getCollisionShapeData(block_id, -1), flush=True)
+            # for block_id in self.blocks_id:
+            #     print(f"[DEBUG] block{block_id}:", self.p.getCollisionShapeData(block_id, -1), flush=True)
         # Make the robot invisible
         if self.invisible_robot:
             for shape in self.p.getVisualShapeData(self.robot.id):
@@ -2192,10 +2192,10 @@ class ArmStack(ArmPickAndPlace):
         return images
     
 class ArmStackwLowPlanner(ArmStack):
-    def __init__(self, *args, actionRepeat=10, use_low_level_planner=True, force_scale=0., compute_path=False, **kwargs):
+    def __init__(self, *args, actionRepeat=10, use_low_level_planner=True, record_path=False, **kwargs):
         self.action_repeat = actionRepeat
         self.use_low_level_planner = use_low_level_planner
-        self.compute_path = compute_path
+        self.record_path = record_path
         self.obj_T_grasp = None
 
         self.__init_args = copy.deepcopy(args)
@@ -2302,9 +2302,6 @@ class ArmStackwLowPlanner(ArmStack):
                     future_pos = self._get_achieved_goal()[0]
                     stable = not any(np.linalg.norm(future_pos - cur_pos, axis=-1) >= 1e-3)
                 else:
-                    # print("[DEBUG] low level moving")
-                    # _state = self.p.saveState()
-                    # res, path = self._planner.move_one_object(obj_id, tgt_pos, tgt_orn)
                     print("[DEBUG] primitive moving")
                     # The reset here will remove all the contact constraints created in robot motion
                     self.robot.reset_primitive(
@@ -2314,9 +2311,8 @@ class ArmStackwLowPlanner(ArmStack):
                     )
                     joint_states = self.p.getJointStates(self.robot._robot, self.robot.motorIndices)
                     servo_angles = [item[0] for item in joint_states]
-                    print("reset robot joints", servo_angles)
                     _state = self.p.saveState()
-                    if not hasattr(self.robot, "video_writer"):
+                    if self.record_path and not hasattr(self.robot, "video_writer"):
                         import imageio
                         self.robot.video_writer = imageio.get_writer("robot_demo.mp4",
                                                 fps=20,
@@ -2332,8 +2328,6 @@ class ArmStackwLowPlanner(ArmStack):
                     O_T_obj_init[:3, :3] = np.array(self.p.getMatrixFromQuaternion(obj_init_quat)).reshape(3, 3)
                     O_T_obj_init[:3, 3] = np.array(obj_init_pos)
                     O_T_grasp_pick = [O_T_obj_init @ local_grasp for local_grasp in self.obj_T_grasp]
-                    for _ in range(len(O_T_grasp_pick)):
-                        assert np.linalg.norm(O_T_grasp_pick[_][:3, 3] - obj_init_pos) < 1e-3
                     # Get place pose
                     O_T_grasp_place = []
                     for x_rot in [0., np.pi / 2, np.pi, -np.pi / 2]:
@@ -2345,7 +2339,7 @@ class ArmStackwLowPlanner(ArmStack):
                     q0 = np.array(servo_angles)[:7]
                     init_eef_pos = self.robot.get_eef_position()
                     init_eef_quat = self.robot.get_eef_orn()
-                    valid_grasp_idx, sym_idx = self._get_valid_grasp_info(O_T_grasp_pick, O_T_grasp_place, q0, init_eef_pos, init_eef_quat)
+                    valid_grasp_idx, sym_idx = self._get_valid_grasp_info(O_T_grasp_pick, O_T_grasp_place, q0, init_eef_pos, init_eef_quat, obj_id)
                     if valid_grasp_idx is None:
                         print("[ERROR] fail to find grasp")
                         res = -1
@@ -2357,16 +2351,6 @@ class ArmStackwLowPlanner(ArmStack):
                             O_T_grasp_pick[valid_grasp_idx], O_T_grasp_place[sym_idx][valid_grasp_idx], 
                             init_eef_pos, init_eef_quat, attachment
                         )
-                        # ee_trajectory = [
-                        #     (O_T_grasp_pick[valid_grasp_idx][:3, 3] - pick_prob_vec * 0.05, quat_pick, None, None),
-                        #     (O_T_grasp_pick[valid_grasp_idx][:3, 3], quat_pick, "close", None),
-                        #     (O_T_grasp_pick[valid_grasp_idx][:3, 3] - pick_prob_vec * 0.1, quat_pick, None, attachment),
-                        #     (np.concatenate([(O_T_grasp_pick[valid_grasp_idx][:3, 3] - pick_prob_vec * 0.1)[:2], [0.3]]), quat_place, None, attachment),
-                        #     (O_T_grasp_place[sym_idx][valid_grasp_idx][:3, 3] - place_prob_vec * 0.05, quat_place, None, attachment),
-                        #     (O_T_grasp_place[sym_idx][valid_grasp_idx][:3, 3], quat_place, "open", attachment),
-                        #     (O_T_grasp_place[sym_idx][valid_grasp_idx][:3, 3] - place_prob_vec * 0.05 + np.array([0., 0., 0.15]), quat_place, None, None),
-                        #     (init_eef_pos, init_eef_quat, None, None)
-                        # ]
                         for i in range(len(ee_trajectory)):
                             self.robot.change_visual(True)
                             res = self.robot.move_to_ee_pose(ee_trajectory[i][0], ee_trajectory[i][1], ee_trajectory[i][3])
@@ -2411,7 +2395,7 @@ class ArmStackwLowPlanner(ArmStack):
     
     def _get_local_grasp(self):
         obj_T_grasp = []
-        for x_offset in [0.]:
+        for x_offset in [0., 0.04, -0.04]:
             for x_rot in [0., np.pi / 2, np.pi, -np.pi / 2]:
                 for z_rot in [0., np.pi]:
                     local_grasp = np.eye(4)
@@ -2444,10 +2428,11 @@ class ArmStackwLowPlanner(ArmStack):
         ]
         return ee_trajectory
     
-    def _get_valid_grasp_info(self, O_T_grasp_pick, O_T_grasp_place, q0, init_eef_pos, init_eef_quat):
+    def _get_valid_grasp_info(self, O_T_grasp_pick, O_T_grasp_place, q0, init_eef_pos, init_eef_quat, obj_id):
         valid_grasp_idx = None
+        all_valid_grasp_info = []
         for i in range(len(O_T_grasp_pick)):
-            print(O_T_grasp_pick[i], self.obj_T_grasp[i])
+            # print(O_T_grasp_pick[i], self.obj_T_grasp[i])
             quat_pick = mat2quat(O_T_grasp_pick[i][:3, :3])
             pick_prob_vec, _ = self.p.multiplyTransforms([0., 0., 0.], quat_pick, [0., 0., 1.0], [0., 0., 0., 1.0])
             pick_prob_vec = np.array(pick_prob_vec)
@@ -2458,22 +2443,29 @@ class ArmStackwLowPlanner(ArmStack):
                 quat_place = mat2quat(O_T_grasp_place[sym_idx][i][:3, :3])
                 place_prob_vec, _ = self.p.multiplyTransforms([0., 0., 0.], quat_place, [0., 0., 1.0], [0., 0., 0., 1.0])
                 place_prob_vec = np.array(place_prob_vec)
-                print("place prob", place_prob_vec)
+                # print("place prob", place_prob_vec)
                 if np.dot(place_prob_vec, np.array([0., 0., 1.0])) > 0.6 or np.dot(place_prob_vec, np.array([-1.0, 0., 0.])) > 0.6:
                     pass
                 else:
-                    # TODO: save all valid solutions, then return a shortest one
-                    # TODO: more condition: collision for waypoints (self and with table)
+                    # save all valid solutions, then return a shortest one
+                    # valid condition: can find IK solution, no collision in waypoints (self and with objects in the scene)
                     pick_matrix = O_T_grasp_pick[i]
                     place_matrix = O_T_grasp_place[sym_idx][i]
-                    _q = q0
-                    for pose in self._get_pick_place_waypoints(pick_matrix, place_matrix, init_eef_pos, init_eef_quat):
-                        _q, is_success = self.robot.solve_inverse_kinematics(pose[0], pose[1], _q)
+                    _input_q = q0
+                    sol_q_distance = np.zeros_like(_input_q)
+                    attachment = dict(obj_id=self.blocks_id[obj_id], obj_T_grasp=self.obj_T_grasp[i])
+                    for pose in self._get_pick_place_waypoints(pick_matrix, place_matrix, init_eef_pos, init_eef_quat, attachment):
+                        _q, is_success = self.robot.solve_inverse_kinematics(pose[0], pose[1], _input_q)
+                        no_collision = self._check_collision_with_q(_q, pose[3])
+                        is_success = is_success and no_collision
+                        sol_q_distance += np.abs(_q - _input_q)
+                        _input_q = _q
                         if not is_success:
                             break
                     if is_success:
-                        valid_grasp_idx = i
-                        return valid_grasp_idx, sym_idx
+                        # valid_grasp_idx = i
+                        all_valid_grasp_info.append(dict(grasp_idx=i, sym_idx=sym_idx, distance=sol_q_distance))
+                        # return valid_grasp_idx, sym_idx
                     # place_success = True
                     # break
             # if not place_success:
@@ -2484,8 +2476,66 @@ class ArmStackwLowPlanner(ArmStack):
             #     valid_grasp_idx = i
             #     break
         # return valid_grasp_idx, pick_prob_vec, quat_pick, place_prob_vec, quat_place, sym_idx
-        return None, None
+        if len(all_valid_grasp_info):
+            _best_info_idx = np.argmin([np.max(info["distance"]) for info in all_valid_grasp_info])
+            valid_grasp_idx = all_valid_grasp_info[_best_info_idx]["grasp_idx"]
+            sym_idx = all_valid_grasp_info[_best_info_idx]["sym_idx"]
+            return valid_grasp_idx, sym_idx
+        else:
+            return None, None
             
+    def _check_collision_with_q(self, q, attachment=None):
+        # TODO: the collision check is incomplete now. 
+        # The collision between the attachment and other objects is not checked.
+        # The robot gripper is assumed as open.
+        _state = self.p.saveState()
+        self.robot.teleport_joint(q)
+        self.p.performCollisionDetection()
+        contact_points = self.p.getContactPoints(self.robot.id)
+        # (bodyA, linkA), (bodyB, linkB)
+        contact_body_and_link = set([((info[1], info[3]), (info[2], info[4])) for info in contact_points])
+        robot_body_links = [(self.robot.id, j) for j in range(self.p.getNumJoints(self.robot.id))]
+        robot_self_pairs = list(product(robot_body_links, robot_body_links))
+        if attachment is None:
+            object_body_links = [(self.table_id, -1)] + [(self.blocks_id[i], -1) for i in range(len(self.blocks_id))]
+        else:
+            object_body_links = [(self.table_id, -1)] + \
+                [(self.blocks_id[i], -1) for i in range(len(self.blocks_id)) if self.blocks_id[i] != attachment["obj_id"]]
+        robot_and_object_pairs = list(product(robot_body_links, object_body_links))
+        disabled_pairs = [((self.robot.id, 0), (self.table_id, -1))]
+        def is_adjacent_link(body1, link1, body2, link2):
+            if body1 == body2 and (self.p.getJointInfo(body1, link1)[-1] == link2 or self.p.getJointInfo(body1, link2)[-1] == link1):
+                return True
+            return False
+        def is_in_disabled(body1, link1, body2, link2):
+            for disabled_pair in disabled_pairs:
+                if disabled_pair[0][0] == body1 and disabled_pair[0][1] == link1 and disabled_pair[1][0] == body2 and disabled_pair[1][1] == link2:
+                    return True
+            return False
+        
+        check_pairs = set(filter(lambda x: not is_adjacent_link(*x[0], *x[1]) and not is_in_disabled(*x[0], *x[1]), 
+                             robot_self_pairs + robot_and_object_pairs))
+        no_collision = contact_body_and_link.isdisjoint(check_pairs)
+        if not no_collision:
+            pass
+            # self.robot.change_visual(True)
+            # img = self.render(mode="rgb_array")
+            # plt.imsave("tmp.png", img)
+            # in_contact_links = contact_body_and_link.intersection(check_pairs)
+            # for item in in_contact_links:
+            #     print(item)
+            #     if item[0][1] >= 0:
+            #         print(self.p.getBodyInfo(item[0][0])[1], self.p.getJointInfo(item[0][0], item[0][1])[12])
+            #     else:
+            #         print(self.p.getBodyInfo(item[0][0])[1])
+            #     if item[1][1] >= 0:
+            #         print(self.p.getBodyInfo(item[1][0])[1], self.p.getJointInfo(item[1][0], item[1][1])[12])
+            #     else:
+            #         print(self.p.getBodyInfo(item[1][0])[1])
+        self.p.restoreState(stateId=_state)
+        self.p.removeState(_state)
+        return no_collision
+
     def _sim_until_stable(self):
         count = 0
         while count < 10 and np.linalg.norm(np.concatenate(
